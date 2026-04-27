@@ -4,14 +4,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// ============================================================================
 /// WORKSTATION DATA MAP
 /// ============================================================================
-/// Paste your JSON payload here. Format:
-/// {
-///   'L5_T01': {'dnts_serial': '...', 'category': '...', 'status': '...'},
-///   'L5_T02': {'dnts_serial': '...', 'category': '...', 'status': '...'},
-///   ...
-/// }
+/// Master Blueprint: 332 desks across 7 labs using L#_D## format.
+/// Lab 5 data migrated from L5_T## to L5_D## for uniformity.
   const Map<String, List<Map<String, String>>> workstationData = {
-  "L5_T01": [
+  "L5_D01": [
     {"category": "Monitor", "mfg_serial": "ZZNNH4ZM301248N", "dnts_serial": "CT1_LAB5_MR01"},
     {"category": "Mouse", "mfg_serial": "97205H5", "dnts_serial": "CT1_LAB5_M01"},
     {"category": "Keyboard", "mfg_serial": "95NAA63", "dnts_serial": "CT1_LAB5_K01"},
@@ -19,7 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656D-7825", "dnts_serial": "CT1_LAB5_SSD01"},
     {"category": "AVR", "mfg_serial": "YY2023030106970", "dnts_serial": "CT1_LAB5_AVR01"}
   ],
-  "L5_T02": [
+  "L5_D02": [
     {"category": "Monitor", "mfg_serial": "ZZNNH4ZM501690H", "dnts_serial": "CT1_LAB5_MR02"},
     {"category": "Mouse", "mfg_serial": "96C0DJL", "dnts_serial": "CT1_LAB5_M02"},
     {"category": "Keyboard", "mfg_serial": "95NA3MF", "dnts_serial": "CT1_LAB5_K02"},
@@ -27,7 +23,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656D-3DC5", "dnts_serial": "CT1_LAB5_SSD02"},
     {"category": "AVR", "mfg_serial": "UNKNOWN", "dnts_serial": "CT1_LAB5_AVR02"}
   ],
-  "L5_T03": [
+  "L5_D03": [
     {"category": "Monitor", "mfg_serial": "ZZMH4ZKA00826P", "dnts_serial": "CT1_LAB5_MR03"},
     {"category": "Mouse", "mfg_serial": "97205H2", "dnts_serial": "CT1_LAB5_M03"},
     {"category": "Keyboard", "mfg_serial": "902A2273", "dnts_serial": "CT1_LAB5_K03"},
@@ -35,7 +31,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656E-5855", "dnts_serial": "CT1_LAB5_SSD03"},
     {"category": "AVR", "mfg_serial": "747889", "dnts_serial": "CT1_LAB5_AVR03"}
   ],
-  "L5_T04": [
+  "L5_D04": [
     {"category": "Monitor", "mfg_serial": "ZZNNH4ZM501325A", "dnts_serial": "CT1_LAB5_MR04"},
     {"category": "Mouse", "mfg_serial": "97205HH", "dnts_serial": "CT1_LAB5_M04"},
     {"category": "Keyboard", "mfg_serial": "95NA4CL", "dnts_serial": "CT1_LAB5_K04"},
@@ -43,7 +39,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656E-5055", "dnts_serial": "CT1_LAB5_SSD04"},
     {"category": "AVR", "mfg_serial": "YY2023030107", "dnts_serial": "CT1_LAB5_AVR04"}
   ],
-  "L5_T05": [
+  "L5_D05": [
     {"category": "Monitor", "mfg_serial": "ZZNNH4ZM500954X", "dnts_serial": "CT1_LAB5_MR05"},
     {"category": "Mouse", "mfg_serial": "97205H3", "dnts_serial": "CT1_LAB5_M05"},
     {"category": "Keyboard", "mfg_serial": "95NAA61", "dnts_serial": "CT1_LAB5_K05"},
@@ -51,7 +47,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656D-3345", "dnts_serial": "CT1_LAB5_SSD05"},
     {"category": "AVR", "mfg_serial": "716164", "dnts_serial": "CT1_LAB5_AVR05"}
   ],
-  "L5_T06": [
+  "L5_D06": [
     {"category": "Monitor", "mfg_serial": "ZZNNH4ZM300546T", "dnts_serial": "CT1_LAB5_MR06"},
     {"category": "Mouse", "mfg_serial": "97205H3", "dnts_serial": "CT1_LAB5_M06"},
     {"category": "Keyboard", "mfg_serial": "95NAA5X", "dnts_serial": "CT1_LAB5_K06"},
@@ -59,7 +55,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656D-3345", "dnts_serial": "CT1_LAB5_SSD06"},
     {"category": "AVR", "mfg_serial": "UNKNOWN", "dnts_serial": "CT1_LAB5_AVR06"}
   ],
-  "L5_T07": [
+  "L5_D07": [
     {"category": "Monitor", "mfg_serial": "ZZNNH4ZM304167F", "dnts_serial": "CT1_LAB5_MR07"},
     {"category": "Mouse", "mfg_serial": "97205HG", "dnts_serial": "CT1_LAB5_M07"},
     {"category": "Keyboard", "mfg_serial": "95PA9M8", "dnts_serial": "CT1_LAB5_K07"},
@@ -67,7 +63,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656D-DAF5", "dnts_serial": "CT1_LAB5_SSD07"},
     {"category": "AVR", "mfg_serial": "YY2023030106971", "dnts_serial": "CT1_LAB5_AVR07"}
   ],
-  "L5_T08": [
+  "L5_D08": [
     {"category": "Monitor", "mfg_serial": "ZZNNH4ZM500850X", "dnts_serial": "CT1_LAB5_MR08"},
     {"category": "Mouse", "mfg_serial": "97205H8", "dnts_serial": "CT1_LAB5_M08"},
     {"category": "Keyboard", "mfg_serial": "95PA9M5", "dnts_serial": "CT1_LAB5_K08"},
@@ -75,7 +71,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656D-4015", "dnts_serial": "CT1_LAB5_SSD08"},
     {"category": "AVR", "mfg_serial": "651516", "dnts_serial": "CT1_LAB5_AVR08"}
   ],
-  "L5_T09": [
+  "L5_D09": [
     {"category": "Monitor", "mfg_serial": "ZZNNH4ZM103480F", "dnts_serial": "CT1_LAB5_MR09"},
     {"category": "Mouse", "mfg_serial": "97205HV", "dnts_serial": "CT1_LAB5_M09"},
     {"category": "Keyboard", "mfg_serial": "9021AN0M", "dnts_serial": "CT1_LAB5_K09"},
@@ -83,7 +79,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656C-FFC5", "dnts_serial": "CT1_LAB5_SSD09"},
     {"category": "AVR", "mfg_serial": "YY2023030107630", "dnts_serial": "CT1_LAB5_AVR09"}
   ],
-  "L5_T10": [
+  "L5_D10": [
     {"category": "Monitor", "mfg_serial": "ZZNNH4ZM502441H", "dnts_serial": "CT1_LAB5_MR10"},
     {"category": "Mouse", "mfg_serial": "97205J1", "dnts_serial": "CT1_LAB5_M10"},
     {"category": "Keyboard", "mfg_serial": "95NAA5Y", "dnts_serial": "CT1_LAB5_K10"},
@@ -91,7 +87,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656E-4695", "dnts_serial": "CT1_LAB5_SSD10"},
     {"category": "AVR", "mfg_serial": "747962", "dnts_serial": "CT1_LAB5_AVR10"}
   ],
-  "L5_T11": [
+  "L5_D11": [
     {"category": "Monitor", "mfg_serial": "ZZNNH4ZM300811F", "dnts_serial": "CT1_LAB5_MR11"},
     {"category": "Mouse", "mfg_serial": "97205VX", "dnts_serial": "CT1_LAB5_M11"},
     {"category": "Keyboard", "mfg_serial": "902A1N0G", "dnts_serial": "CT1_LAB5_K11"},
@@ -99,7 +95,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656C-F0B5", "dnts_serial": "CT1_LAB5_SSD11"},
     {"category": "AVR", "mfg_serial": "YY2023030112396", "dnts_serial": "CT1_LAB5_AVR11"}
   ],
-  "L5_T12": [
+  "L5_D12": [
     {"category": "Monitor", "mfg_serial": "ZZNNH4ZM501781Z", "dnts_serial": "CT1_LAB5_MR12"},
     {"category": "Mouse", "mfg_serial": "97205H5", "dnts_serial": "CT1_LAB5_M12"},
     {"category": "Keyboard", "mfg_serial": "95PA9M7", "dnts_serial": "CT1_LAB5_K12"},
@@ -107,7 +103,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656E-4FE5", "dnts_serial": "CT1_LAB5_SSD12"},
     {"category": "AVR", "mfg_serial": "UNKNOWN", "dnts_serial": "CT1_LAB5_AVR12"}
   ],
-  "L5_T13": [
+  "L5_D13": [
     {"category": "Monitor", "mfg_serial": "ZZNNH4ZM902095R", "dnts_serial": "CT1_LAB5_MR13"},
     {"category": "Mouse", "mfg_serial": "23XWU1", "dnts_serial": "CT1_LAB5_M13"},
     {"category": "Keyboard", "mfg_serial": "23X10U00", "dnts_serial": "CT1_LAB5_K13"},
@@ -115,7 +111,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656D-01F5", "dnts_serial": "CT1_LAB5_SSD13"},
     {"category": "AVR", "mfg_serial": "YY20230106447", "dnts_serial": "CT1_LAB5_AVR13"}
   ],
-  "L5_T14": [
+  "L5_D14": [
     {"category": "Monitor", "mfg_serial": "V8CFH9NB503241D", "dnts_serial": "CT1_LAB5_MR14"},
     {"category": "Mouse", "mfg_serial": "97205HN", "dnts_serial": "CT1_LAB5_M14"},
     {"category": "Keyboard", "mfg_serial": "95PA9M3", "dnts_serial": "CT1_LAB5_K14"},
@@ -123,7 +119,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656E-2225", "dnts_serial": "CT1_LAB5_SSD14"},
     {"category": "AVR", "mfg_serial": "UNKNOWN", "dnts_serial": "CT1_LAB5_AVR14"}
   ],
-  "L5_T15": [
+  "L5_D15": [
     {"category": "Monitor", "mfg_serial": "V8CFH9NB407138F", "dnts_serial": "CT1_LAB5_MR15"},
     {"category": "Mouse", "mfg_serial": "23XWU01", "dnts_serial": "CT1_LAB5_M15"},
     {"category": "Keyboard", "mfg_serial": "23XWU00", "dnts_serial": "CT1_LAB5_K15"},
@@ -131,7 +127,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656E-0BE5", "dnts_serial": "CT1_LAB5_SSD15"},
     {"category": "AVR", "mfg_serial": "YY2023030105499", "dnts_serial": "CT1_LAB5_AVR15"}
   ],
-  "L5_T16": [
+  "L5_D16": [
     {"category": "Monitor", "mfg_serial": "V8CFH9NB500022E", "dnts_serial": "CT1_LAB5_MR16"},
     {"category": "Mouse", "mfg_serial": "97205HN", "dnts_serial": "CT1_LAB5_M16"},
     {"category": "Keyboard", "mfg_serial": "95NAA60", "dnts_serial": "CT1_LAB5_K16"},
@@ -139,7 +135,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656E-51A5", "dnts_serial": "CT1_LAB5_SSD16"},
     {"category": "AVR", "mfg_serial": "729888", "dnts_serial": "CT1_LAB5_AVR16"}
   ],
-  "L5_T17": [
+  "L5_D17": [
     {"category": "Monitor", "mfg_serial": "V8CFH9NB4009592", "dnts_serial": "CT1_LAB5_MR17"},
     {"category": "Mouse", "mfg_serial": "23XWU01", "dnts_serial": "CT1_LAB5_M17"},
     {"category": "Keyboard", "mfg_serial": "95NAA9L", "dnts_serial": "CT1_LAB5_K17"},
@@ -147,7 +143,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656D-44F5", "dnts_serial": "CT1_LAB5_SSD17"},
     {"category": "AVR", "mfg_serial": "YY2023030107631", "dnts_serial": "CT1_LAB5_AVR17"}
   ],
-  "L5_T18": [
+  "L5_D18": [
     {"category": "Monitor", "mfg_serial": "V8CFH9NB4004372", "dnts_serial": "CT1_LAB5_MR18"},
     {"category": "Mouse", "mfg_serial": "23XWU01", "dnts_serial": "CT1_LAB5_M18"},
     {"category": "Keyboard", "mfg_serial": "23XWU00", "dnts_serial": "CT1_LAB5_K18"},
@@ -155,7 +151,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656C-F175", "dnts_serial": "CT1_LAB5_SSD18"},
     {"category": "AVR", "mfg_serial": "747896", "dnts_serial": "CT1_LAB5_AVR18"}
   ],
-  "L5_T19": [
+  "L5_D19": [
     {"category": "Monitor", "mfg_serial": "ZWF4H4LC902776V", "dnts_serial": "CT1_LAB5_MR19"},
     {"category": "Mouse", "mfg_serial": "23XWU01", "dnts_serial": "CT1_LAB5_M19"},
     {"category": "Keyboard", "mfg_serial": "23XWU00", "dnts_serial": "CT1_LAB5_K19"},
@@ -163,7 +159,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656E-21B5", "dnts_serial": "CT1_LAB5_SSD19"},
     {"category": "AVR", "mfg_serial": "YY2023030106448", "dnts_serial": "CT1_LAB5_AVR19"}
   ],
-  "L5_T20": [
+  "L5_D20": [
     {"category": "Monitor", "mfg_serial": "V8CFH9NB401474Y", "dnts_serial": "CT1_LAB5_MR20"},
     {"category": "Mouse", "mfg_serial": "23XWU01", "dnts_serial": "CT1_LAB5_M20"},
     {"category": "Keyboard", "mfg_serial": "23XWU00", "dnts_serial": "CT1_LAB5_K20"},
@@ -171,7 +167,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656D-48B5", "dnts_serial": "CT1_LAB5_SSD20"},
     {"category": "AVR", "mfg_serial": "716049", "dnts_serial": "CT1_LAB5_AVR20"}
   ],
-  "L5_T21": [
+  "L5_D21": [
     {"category": "Monitor", "mfg_serial": "ZWF4H4LC800071H", "dnts_serial": "CT1_LAB5_MR21"},
     {"category": "Mouse", "mfg_serial": "23XWU01", "dnts_serial": "CT1_LAB5_M21"},
     {"category": "Keyboard", "mfg_serial": "23XWU00", "dnts_serial": "CT1_LAB5_K21"},
@@ -179,7 +175,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656E-5035", "dnts_serial": "CT1_LAB5_SSD21"},
     {"category": "AVR", "mfg_serial": "747379", "dnts_serial": "CT1_LAB5_AVR21"}
   ],
-  "L5_T22": [
+  "L5_D22": [
     {"category": "Monitor", "mfg_serial": "V8CFH9NB400907W", "dnts_serial": "CT1_LAB5_MR22"},
     {"category": "Mouse", "mfg_serial": "23XWU01", "dnts_serial": "CT1_LAB5_M22"},
     {"category": "Keyboard", "mfg_serial": "23XWU00", "dnts_serial": "CT1_LAB5_K22"},
@@ -187,7 +183,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656D-4335", "dnts_serial": "CT1_LAB5_SSD22"},
     {"category": "AVR", "mfg_serial": "716177", "dnts_serial": "CT1_LAB5_AVR22"}
   ],
-  "L5_T23": [
+  "L5_D23": [
     {"category": "Monitor", "mfg_serial": "V8CFH9NB405757F", "dnts_serial": "CT1_LAB5_MR23"},
     {"category": "Mouse", "mfg_serial": "23XWU01", "dnts_serial": "CT1_LAB5_M23"},
     {"category": "Keyboard", "mfg_serial": "23XWU00", "dnts_serial": "CT1_LAB5_K23"},
@@ -195,7 +191,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656D-DA05", "dnts_serial": "CT1_LAB5_SSD23"},
     {"category": "AVR", "mfg_serial": "716055", "dnts_serial": "CT1_LAB5_AVR23"}
   ],
-  "L5_T24": [
+  "L5_D24": [
     {"category": "Monitor", "mfg_serial": "ZWF4H4LC902284X", "dnts_serial": "CT1_LAB5_MR24"},
     {"category": "Mouse", "mfg_serial": "23XWU01", "dnts_serial": "CT1_LAB5_M24"},
     {"category": "Keyboard", "mfg_serial": "23XWU00", "dnts_serial": "CT1_LAB5_K24"},
@@ -203,7 +199,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "5193073B027F00172252", "dnts_serial": "CT1_LAB5_SSD24"},
     {"category": "AVR", "mfg_serial": "UNKNOWN", "dnts_serial": "CT1_LAB5_AVR24"}
   ],
-  "L5_T25": [
+  "L5_D25": [
     {"category": "Monitor", "mfg_serial": "336010998233", "dnts_serial": "CT1_LAB5_MR25"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M25"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K25"},
@@ -211,7 +207,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "5193073B027F00172245", "dnts_serial": "CT1_LAB5_SSD25"},
     {"category": "AVR", "mfg_serial": "YY14062327059", "dnts_serial": "CT1_LAB5_AVR25"}
   ],
-  "L5_T26": [
+  "L5_D26": [
     {"category": "Monitor", "mfg_serial": "336010533233", "dnts_serial": "CT1_LAB5_MR26"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M26"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K26"},
@@ -219,7 +215,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "51A9073B027D00161931", "dnts_serial": "CT1_LAB5_SSD26"},
     {"category": "AVR", "mfg_serial": "YY14062327064", "dnts_serial": "CT1_LAB5_AVR26"}
   ],
-  "L5_T27": [
+  "L5_D27": [
     {"category": "Monitor", "mfg_serial": "336010569233", "dnts_serial": "CT1_LAB5_MR27"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M27"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K27"},
@@ -227,7 +223,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "1153073B021800171470", "dnts_serial": "CT1_LAB5_SSD27"},
     {"category": "AVR", "mfg_serial": "YY14072303864", "dnts_serial": "CT1_LAB5_AVR27"}
   ],
-  "L5_T28": [
+  "L5_D28": [
     {"category": "Monitor", "mfg_serial": "336011927233", "dnts_serial": "CT1_LAB5_MR28"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M28"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K28"},
@@ -235,7 +231,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "51A9073B027D00161897", "dnts_serial": "CT1_LAB5_SSD28"},
     {"category": "AVR", "mfg_serial": "YY14062327060", "dnts_serial": "CT1_LAB5_AVR28"}
   ],
-  "L5_T29": [
+  "L5_D29": [
     {"category": "Monitor", "mfg_serial": "336011927233", "dnts_serial": "CT1_LAB5_MR29"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M29"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K29"},
@@ -243,7 +239,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "5193073B027F00172285", "dnts_serial": "CT1_LAB5_SSD29"},
     {"category": "AVR", "mfg_serial": "YY14072303865", "dnts_serial": "CT1_LAB5_AVR29"}
   ],
-  "L5_T30": [
+  "L5_D30": [
     {"category": "Monitor", "mfg_serial": "336010995233", "dnts_serial": "CT1_LAB5_MR30"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M30"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K30"},
@@ -251,7 +247,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656D-DAE5", "dnts_serial": "CT1_LAB5_SSD30"},
     {"category": "AVR", "mfg_serial": "YY14072303861", "dnts_serial": "CT1_LAB5_AVR30"}
   ],
-  "L5_T31": [
+  "L5_D31": [
     {"category": "Monitor", "mfg_serial": "V8CFH9NB503252A", "dnts_serial": "CT1_LAB5_MR31"},
     {"category": "Mouse", "mfg_serial": "23XWUO1", "dnts_serial": "CT1_LAB5_M31"},
     {"category": "Keyboard", "mfg_serial": "23XWU00", "dnts_serial": "CT1_LAB5_K31"},
@@ -259,7 +255,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656D-3DB5", "dnts_serial": "CT1_LAB5_SSD31"},
     {"category": "AVR", "mfg_serial": "YY2023030107629", "dnts_serial": "CT1_LAB5_AVR31"}
   ],
-  "L5_T32": [
+  "L5_D32": [
     {"category": "Monitor", "mfg_serial": "V8CFH9NB407127H", "dnts_serial": "CT1_LAB5_MR32"},
     {"category": "Mouse", "mfg_serial": "23XWUO1", "dnts_serial": "CT1_LAB5_M32"},
     {"category": "Keyboard", "mfg_serial": "23XWU00", "dnts_serial": "CT1_LAB5_K32"},
@@ -267,7 +263,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656D-DA15", "dnts_serial": "CT1_LAB5_SSD32"},
     {"category": "AVR", "mfg_serial": "YY2023021525931", "dnts_serial": "CT1_LAB5_AVR32"}
   ],
-  "L5_T33": [
+  "L5_D33": [
     {"category": "Monitor", "mfg_serial": "V8CFH9NB406005Y", "dnts_serial": "CT1_LAB5_MR33"},
     {"category": "Mouse", "mfg_serial": "23XWUO1", "dnts_serial": "CT1_LAB5_M33"},
     {"category": "Keyboard", "mfg_serial": "23XWU00", "dnts_serial": "CT1_LAB5_K33"},
@@ -275,7 +271,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656E-0AA5", "dnts_serial": "CT1_LAB5_SSD33"},
     {"category": "AVR", "mfg_serial": "747630", "dnts_serial": "CT1_LAB5_AVR33"}
   ],
-  "L5_T34": [
+  "L5_D34": [
     {"category": "Monitor", "mfg_serial": "V8CFH9NB502257H", "dnts_serial": "CT1_LAB5_MR34"},
     {"category": "Mouse", "mfg_serial": "23XWUO1", "dnts_serial": "CT1_LAB5_M34"},
     {"category": "Keyboard", "mfg_serial": "23XWU00", "dnts_serial": "CT1_LAB5_K34"},
@@ -283,7 +279,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656D-32C5", "dnts_serial": "CT1_LAB5_SSD34"},
     {"category": "AVR", "mfg_serial": "YY2023030101112", "dnts_serial": "CT1_LAB5_AVR34"}
   ],
-  "L5_T35": [
+  "L5_D35": [
     {"category": "Monitor", "mfg_serial": "V8CFH9NB400710R", "dnts_serial": "CT1_LAB5_MR35"},
     {"category": "Mouse", "mfg_serial": "23XWUO1", "dnts_serial": "CT1_LAB5_M35"},
     {"category": "Keyboard", "mfg_serial": "23XWU00", "dnts_serial": "CT1_LAB5_K35"},
@@ -291,7 +287,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0026-B768-656C-F735", "dnts_serial": "CT1_LAB5_SSD35"},
     {"category": "AVR", "mfg_serial": "YY2023030105498", "dnts_serial": "CT1_LAB5_AVR35"}
   ],
-  "L5_T36": [
+  "L5_D36": [
     {"category": "Monitor", "mfg_serial": "V8CFH9NB309294K", "dnts_serial": "CT1_LAB5_MR36"},
     {"category": "Mouse", "mfg_serial": "23XWUO1", "dnts_serial": "CT1_LAB5_M36"},
     {"category": "Keyboard", "mfg_serial": "23XWU00", "dnts_serial": "CT1_LAB5_K36"},
@@ -299,7 +295,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "5193073B027F00172291", "dnts_serial": "CT1_LAB5_SSD36"},
     {"category": "AVR", "mfg_serial": "YY19052312067", "dnts_serial": "CT1_LAB5_AVR36"}
   ],
-  "L5_T37": [
+  "L5_D37": [
     {"category": "Monitor", "mfg_serial": "336010497233", "dnts_serial": "CT1_LAB5_MR37"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M37"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K37"},
@@ -307,7 +303,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "KJ202101001809315", "dnts_serial": "CT1_LAB5_SSD37"},
     {"category": "AVR", "mfg_serial": "YY14062327063", "dnts_serial": "CT1_LAB5_AVR37"}
   ],
-  "L5_T38": [
+  "L5_D38": [
     {"category": "Monitor", "mfg_serial": "336010514233", "dnts_serial": "CT1_LAB5_MR38"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M38"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K38"},
@@ -315,7 +311,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "5193073B027F00172236", "dnts_serial": "CT1_LAB5_SSD38"},
     {"category": "AVR", "mfg_serial": "YY14072303869", "dnts_serial": "CT1_LAB5_AVR38"}
   ],
-  "L5_T39": [
+  "L5_D39": [
     {"category": "Monitor", "mfg_serial": "3360110495233", "dnts_serial": "CT1_LAB5_MR39"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M39"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K39"},
@@ -323,7 +319,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "KJ202101001809320", "dnts_serial": "CT1_LAB5_SSD39"},
     {"category": "AVR", "mfg_serial": "YY08222307027", "dnts_serial": "CT1_LAB5_AVR39"}
   ],
-  "L5_T40": [
+  "L5_D40": [
     {"category": "Monitor", "mfg_serial": "336011929233", "dnts_serial": "CT1_LAB5_MR40"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M40"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K40"},
@@ -331,7 +327,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "51A9073B027D00161934", "dnts_serial": "CT1_LAB5_SSD40"},
     {"category": "AVR", "mfg_serial": "YY08222304556", "dnts_serial": "CT1_LAB5_AVR40"}
   ],
-  "L5_T41": [
+  "L5_D41": [
     {"category": "Monitor", "mfg_serial": "336011942233", "dnts_serial": "CT1_LAB5_MR41"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M41"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K41"},
@@ -339,7 +335,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "5193073B027F00172276", "dnts_serial": "CT1_LAB5_SSD41"},
     {"category": "AVR", "mfg_serial": "YY14072303866", "dnts_serial": "CT1_LAB5_AVR41"}
   ],
-  "L5_T42": [
+  "L5_D42": [
     {"category": "Monitor", "mfg_serial": "336010973233", "dnts_serial": "CT1_LAB5_MR42"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M42"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K42"},
@@ -347,7 +343,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0E74073B020000152289", "dnts_serial": "CT1_LAB5_SSD42"},
     {"category": "AVR", "mfg_serial": "YY14062327061", "dnts_serial": "CT1_LAB5_AVR42"}
   ],
-  "L5_T43": [
+  "L5_D43": [
     {"category": "Monitor", "mfg_serial": "336010527233", "dnts_serial": "CT1_LAB5_MR43"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M43"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K43"},
@@ -355,7 +351,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "0E74073B020000152337", "dnts_serial": "CT1_LAB5_SSD43"},
     {"category": "AVR", "mfg_serial": "YY08222307032", "dnts_serial": "CT1_LAB5_AVR43"}
   ],
-  "L5_T44": [
+  "L5_D44": [
     {"category": "Monitor", "mfg_serial": "336011957233", "dnts_serial": "CT1_LAB5_MR44"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M44"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K44"},
@@ -363,7 +359,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "5193073B027F00172246", "dnts_serial": "CT1_LAB5_SSD44"},
     {"category": "AVR", "mfg_serial": "YY08222304560", "dnts_serial": "CT1_LAB5_AVR44"}
   ],
-  "L5_T45": [
+  "L5_D45": [
     {"category": "Monitor", "mfg_serial": "336011745233", "dnts_serial": "CT1_LAB5_MR45"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M45"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K45"},
@@ -371,7 +367,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "115E073B021800171453", "dnts_serial": "CT1_LAB5_SSD45"},
     {"category": "AVR", "mfg_serial": "YY08222304557", "dnts_serial": "CT1_LAB5_AVR45"}
   ],
-  "L5_T46": [
+  "L5_D46": [
     {"category": "Monitor", "mfg_serial": "336011928233", "dnts_serial": "CT1_LAB5_MR46"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M46"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K46"},
@@ -379,7 +375,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "115E073B021800171520", "dnts_serial": "CT1_LAB5_SSD46"},
     {"category": "AVR", "mfg_serial": "YY08222307029", "dnts_serial": "CT1_LAB5_AVR46"}
   ],
-  "L5_T47": [
+  "L5_D47": [
     {"category": "Monitor", "mfg_serial": "336010841233", "dnts_serial": "CT1_LAB5_MR47"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M47"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K47"},
@@ -387,7 +383,7 @@ import 'package:shared_preferences/shared_preferences.dart';
     {"category": "SSD", "mfg_serial": "115E073B021800171465", "dnts_serial": "CT1_LAB5_SSD47"},
     {"category": "AVR", "mfg_serial": "YY08222307025", "dnts_serial": "CT1_LAB5_AVR47"}
   ],
-  "L5_T48": [
+  "L5_D48": [
     {"category": "Monitor", "mfg_serial": "336010503233", "dnts_serial": "CT1_LAB5_MR48"},
     {"category": "Mouse", "mfg_serial": "23JIU01", "dnts_serial": "CT1_LAB5_M48"},
     {"category": "Keyboard", "mfg_serial": "23UIU00", "dnts_serial": "CT1_LAB5_K48"},

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // For haptic feedback
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../seed_lab5_data.dart';
@@ -17,7 +18,8 @@ class InteractiveMapScreen extends StatefulWidget {
   State<InteractiveMapScreen> createState() => _InteractiveMapScreenState();
 }
 
-class _InteractiveMapScreenState extends State<InteractiveMapScreen> {
+class _InteractiveMapScreenState extends State<InteractiveMapScreen>
+    with TickerProviderStateMixin {
   final TransformationController _transformationController =
       TransformationController();
   List<Map<String, dynamic>> _assets = [];
@@ -38,6 +40,25 @@ class _InteractiveMapScreenState extends State<InteractiveMapScreen> {
   bool _isDraggingComponent = false; // Tracks if a drag is active
   List<Map<String, dynamic>> _activeDeskComponents = []; // Components for active desk
   
+  // ── Phase 6: Snap-to-Inspect Navigation ────────────────────────────────────
+  bool _isInspectorOpen = false;
+  static const double inspectorPanelWidth = 0.4; // 40% of screen width
+  static const double inspectorZoomLevel = 2.5; // Lock zoom during inspection
+  
+  // Kinetic Motion Engine
+  AnimationController? _snapAnimationController;
+  Animation<Matrix4>? _snapAnimation;
+  String? _selectedDeskId; // Track selected desk for pulse animation
+  
+  // Spatial Reset (Escape Gesture)
+  bool _isDraggingFromPanel = false; // Track if drag originated from panel
+  Offset _currentDragPosition = Offset.zero; // Track drag position
+  double _panelBoundaryX = 0.0; // Left edge of inspector panel
+  
+  // Zoom constraints
+  double? _minAllowedScale; // Calculated minimum scale (fit all labs)
+  // ──────────────────────────────────────────────────────────────────────────
+  
   // Status Filter Hit List (Phase 3)
   String activeFilter = 'All';
   final List<String> statusFilters = ['All', 'Deployed', 'Borrowed', 'Under Maintenance', 'Missing', 'Retired', 'In Storage'];
@@ -47,6 +68,16 @@ class _InteractiveMapScreenState extends State<InteractiveMapScreen> {
   
   // Global Sniper Search (Target Bravo)
   String searchQuery = '';
+
+  // ── Phase 5: Absolute Coordinate System ────────────────────────────────────
+  bool isEditMode = false;
+  static const double gridCellSize = 100.0;
+  
+  // Master Blueprint: 332 desks across 7 labs
+  // Grid: 34 columns (A=1 to AH=34) × 20 rows
+  // Pillars: V5(22,5), W5(23,5), V12(22,12), W12(23,12)
+  final Map<String, Offset> deskLayouts = _generateDeskCoordinates();
+  // ──────────────────────────────────────────────────────────────────────────
 
   // Fixed dimensions for perfect alignment
   static const double deskWidth = 50.0;
@@ -79,6 +110,72 @@ class _InteractiveMapScreenState extends State<InteractiveMapScreen> {
     _autoInitializeData();
     _loadAssets();
     _loadAuditLogs();
+    
+    // Add listener to enforce minimum scale
+    _transformationController.addListener(_enforceMinScale);
+    
+    // Set initial zoom to fit all labs after first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fitAllLabs();
+    });
+  }
+  
+  /// Enforce minimum scale constraint
+  void _enforceMinScale() {
+    if (_minAllowedScale == null) return;
+    
+    final matrix = _transformationController.value;
+    final currentScale = matrix.getMaxScaleOnAxis();
+    
+    if (currentScale < _minAllowedScale!) {
+      // Scale is too small, clamp it to minimum
+      final clampedMatrix = matrix.clone();
+      final scaleFactor = _minAllowedScale! / currentScale;
+      clampedMatrix.scale(scaleFactor);
+      _transformationController.value = clampedMatrix;
+    }
+  }
+  
+  /// Fit all laboratories in view (used for initial load and zoom-out button)
+  void _fitAllLabs() {
+    // Actual lab bounds: Columns 2-33 (B-AG), Rows 2-18
+    const double minCol = 2.0;
+    const double maxCol = 33.0;
+    const double minRow = 2.0;
+    const double maxRow = 18.0;
+    
+    final double contentWidth = (maxCol - minCol + 1) * gridCellSize;
+    final double contentHeight = (maxRow - minRow + 1) * gridCellSize;
+    
+    final screenSize = MediaQuery.of(context).size;
+    
+    // Calculate scale to fit all content with padding
+    final double scaleX = (screenSize.width * 0.9) / contentWidth;
+    final double scaleY = (screenSize.height * 0.9) / contentHeight;
+    final double scale = min(scaleX, scaleY);
+    
+    // Set this as the minimum allowed scale
+    _minAllowedScale = scale;
+    
+    print('🔍 Fit scale calculated: $scale (this is now the minimum)');
+    
+    // Calculate center of content in world coordinates
+    final double contentCenterX = (minCol + maxCol) / 2 * gridCellSize;
+    final double contentCenterY = (minRow + maxRow) / 2 * gridCellSize;
+    
+    // Calculate screen center
+    final double screenCenterX = screenSize.width / 2;
+    final double screenCenterY = screenSize.height / 2;
+    
+    // Calculate translation to center content
+    final double translateX = screenCenterX - (contentCenterX * scale);
+    final double translateY = screenCenterY - (contentCenterY * scale);
+    
+    final targetMatrix = Matrix4.identity()
+      ..translate(translateX, translateY)
+      ..scale(scale);
+    
+    _transformationController.value = targetMatrix;
   }
 
   Future<void> _autoInitializeData() async {
@@ -104,6 +201,7 @@ class _InteractiveMapScreenState extends State<InteractiveMapScreen> {
   @override
   void dispose() {
     _transformationController.dispose();
+    _snapAnimationController?.dispose();
     super.dispose();
   }
 
@@ -166,6 +264,20 @@ class _InteractiveMapScreenState extends State<InteractiveMapScreen> {
     print('🖱️ Desk clicked: $deskId');
     print('🔍 Loading components for dock...');
     
+    // Set selected desk for pulse animation
+    setState(() {
+      _selectedDeskId = deskId;
+    });
+    
+    // Trigger pulse animation (will reset after 200ms)
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (mounted) {
+        setState(() {
+          _selectedDeskId = null;
+        });
+      }
+    });
+    
     // Query local storage for this specific workstation
     final localAssets = await getWorkstationAssets(deskId);
     
@@ -174,14 +286,187 @@ class _InteractiveMapScreenState extends State<InteractiveMapScreen> {
       setState(() {
         _activeDeskId = deskId;
         _activeDeskComponents = localAssets;
+        _isInspectorOpen = true;
       });
+      
+      // Snap-to-Inspect: Animate to desk position with spring physics
+      await _snapToDesk(deskId);
     } else {
       print('❌ No assets found in local storage for: $deskId');
       setState(() {
         _activeDeskId = deskId;
         _activeDeskComponents = [];
+        _isInspectorOpen = true;
       });
+      
+      // Still snap even if empty
+      await _snapToDesk(deskId);
     }
+  }
+  
+  /// Snap-to-Inspect: Animate camera with spring physics and overshoot.
+  Future<void> _snapToDesk(String deskId) async {
+    final deskOffset = deskLayouts[deskId];
+    if (deskOffset == null) return;
+    
+    // Get screen dimensions
+    final screenSize = MediaQuery.of(context).size;
+    final targetX = screenSize.width * 0.3; // 30% from left (center-left position)
+    final targetY = screenSize.height * 0.5; // Vertical center
+    
+    // Calculate the desk's world position on canvas
+    // Account for coordinate offset (canvas starts at col 2, row 2)
+    const double offsetX = 2.0 * gridCellSize; // 200px
+    const double offsetY = 2.0 * gridCellSize; // 200px
+    
+    final deskWorldX = (deskOffset.dx * gridCellSize) - offsetX;
+    final deskWorldY = (deskOffset.dy * gridCellSize) - offsetY;
+    
+    final translationX = targetX - (deskWorldX * inspectorZoomLevel);
+    final translationY = targetY - (deskWorldY * inspectorZoomLevel);
+    
+    // Create target transformation matrix
+    final targetMatrix = Matrix4.identity()
+      ..translate(translationX, translationY)
+      ..scale(inspectorZoomLevel);
+    
+    // Get current matrix
+    final currentMatrix = _transformationController.value.clone();
+    
+    // Dispose old controller if exists
+    _snapAnimationController?.dispose();
+    
+    // Create animation controller with spring physics
+    _snapAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    
+    // Use custom curve with overshoot (elastic out)
+    final curvedAnimation = CurvedAnimation(
+      parent: _snapAnimationController!,
+      curve: Curves.elasticOut, // Provides natural overshoot
+    );
+    
+    // Create matrix tween
+    _snapAnimation = Matrix4Tween(
+      begin: currentMatrix,
+      end: targetMatrix,
+    ).animate(curvedAnimation);
+    
+    // Listen to animation and update transformation controller
+    _snapAnimation!.addListener(() {
+      _transformationController.value = _snapAnimation!.value;
+    });
+    
+    // Start animation
+    await _snapAnimationController!.forward();
+  }
+  
+  /// Close inspector panel and reset zoom with smooth animation
+  Future<void> _closeInspector() async {
+    setState(() {
+      _isInspectorOpen = false;
+      _activeDeskId = null;
+      _activeDeskComponents = [];
+    });
+    
+    // Animate back to default zoom
+    final currentMatrix = _transformationController.value.clone();
+    final targetMatrix = Matrix4.identity()..scale(1.0);
+    
+    _snapAnimationController?.dispose();
+    _snapAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    
+    final curvedAnimation = CurvedAnimation(
+      parent: _snapAnimationController!,
+      curve: Curves.easeInOut,
+    );
+    
+    _snapAnimation = Matrix4Tween(
+      begin: currentMatrix,
+      end: targetMatrix,
+    ).animate(curvedAnimation);
+    
+    _snapAnimation!.addListener(() {
+      _transformationController.value = _snapAnimation!.value;
+    });
+    
+    await _snapAnimationController!.forward();
+  }
+  
+  /// Reset to global overview (all labs visible) with smooth animation
+  /// Used for the Spatial Reset escape gesture
+  Future<void> _resetToGlobalOverview() async {
+    // Close inspector panel
+    setState(() {
+      _isInspectorOpen = false;
+      _activeDeskId = null;
+      _activeDeskComponents = [];
+      _selectedDeskId = null;
+    });
+    
+    // Calculate global overview matrix (fit all labs in view)
+    // Actual lab bounds: Columns 2-33 (B-AG), Rows 2-18
+    final double minCol = 2.0;
+    final double maxCol = 33.0;
+    final double minRow = 2.0;
+    final double maxRow = 18.0;
+    
+    final double contentWidth = (maxCol - minCol + 1) * gridCellSize;  // 32 columns
+    final double contentHeight = (maxRow - minRow + 1) * gridCellSize; // 17 rows
+    
+    // Get screen size
+    final screenSize = MediaQuery.of(context).size;
+    
+    // Calculate scale to fit all content with padding
+    final double scaleX = (screenSize.width * 0.95) / contentWidth;
+    final double scaleY = (screenSize.height * 0.95) / contentHeight;
+    final double scale = min(scaleX, scaleY);
+    
+    // Calculate center of content in world coordinates
+    final double contentCenterX = (minCol + maxCol) / 2 * gridCellSize;
+    final double contentCenterY = (minRow + maxRow) / 2 * gridCellSize;
+    
+    // Calculate screen center
+    final double screenCenterX = screenSize.width / 2;
+    final double screenCenterY = screenSize.height / 2;
+    
+    // Calculate translation to center content
+    final double translateX = screenCenterX - (contentCenterX * scale);
+    final double translateY = screenCenterY - (contentCenterY * scale);
+    
+    final targetMatrix = Matrix4.identity()
+      ..translate(translateX, translateY)
+      ..scale(scale);
+    
+    // Animate from current position to global overview
+    final currentMatrix = _transformationController.value.clone();
+    
+    _snapAnimationController?.dispose();
+    _snapAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    
+    final curvedAnimation = CurvedAnimation(
+      parent: _snapAnimationController!,
+      curve: Curves.easeInOutCubic, // Unified ease for fluid reset
+    );
+    
+    _snapAnimation = Matrix4Tween(
+      begin: currentMatrix,
+      end: targetMatrix,
+    ).animate(curvedAnimation);
+    
+    _snapAnimation!.addListener(() {
+      _transformationController.value = _snapAnimation!.value;
+    });
+    
+    await _snapAnimationController!.forward();
   }
 
   Future<void> _listStoredData() async {
@@ -1995,6 +2280,296 @@ class _InteractiveMapScreenState extends State<InteractiveMapScreen> {
     }
   }
 
+  // ── Phase 5: Absolute Coordinate System Helpers ───────────────────────────
+
+  /// Generates the complete 332-desk coordinate map from the Master Blueprint.
+  static Map<String, Offset> _generateDeskCoordinates() {
+    final Map<String, Offset> coords = {};
+    
+    // Lab 6: B-K (2-11), Rows 2-6, 48 desks
+    _addLabDesks(coords, 6, [
+      {'row': 2, 'cols': [2, 11], 'start': 1},   // D1-D10
+      {'row': 3, 'cols': [2, 11], 'start': 11},  // D11-D20
+      {'row': 4, 'cols': [2, 11], 'start': 21},  // D21-D30
+      {'row': 5, 'cols': [2, 11], 'start': 31},  // D31-D40
+      {'row': 6, 'cols': [2, 9], 'start': 41},   // D41-D48 (ends at I)
+    ]);
+    
+    // Lab 7: B-G (2-7), Rows 8-9,11-12,14-15,17-18, 48 desks
+    _addLabDesks(coords, 7, [
+      {'row': 8, 'cols': [2, 7], 'start': 1},    // D1-D6
+      {'row': 9, 'cols': [2, 7], 'start': 7},    // D7-D12
+      {'row': 11, 'cols': [2, 7], 'start': 13},  // D13-D18
+      {'row': 12, 'cols': [2, 7], 'start': 19},  // D19-D24
+      {'row': 14, 'cols': [2, 7], 'start': 25},  // D25-D30
+      {'row': 15, 'cols': [2, 7], 'start': 31},  // D31-D36
+      {'row': 17, 'cols': [2, 7], 'start': 37},  // D37-D42
+      {'row': 18, 'cols': [2, 7], 'start': 43},  // D43-D48
+    ]);
+    
+    // Lab 1: M-T (13-20), Rows 2-3,5-6,8-9, 48 desks
+    _addLabDesks(coords, 1, [
+      {'row': 2, 'cols': [13, 20], 'start': 1},   // D1-D8
+      {'row': 3, 'cols': [13, 20], 'start': 9},   // D9-D16
+      {'row': 5, 'cols': [13, 20], 'start': 17},  // D17-D24
+      {'row': 6, 'cols': [13, 20], 'start': 25},  // D25-D32
+      {'row': 8, 'cols': [13, 20], 'start': 33},  // D33-D40
+      {'row': 9, 'cols': [13, 20], 'start': 41},  // D41-D48
+    ]);
+    
+    // Lab 2: M-T (13-20), Rows 11-12,14-15,17-18, 48 desks
+    _addLabDesks(coords, 2, [
+      {'row': 11, 'cols': [13, 20], 'start': 1},  // D1-D8
+      {'row': 12, 'cols': [13, 20], 'start': 9},  // D9-D16
+      {'row': 14, 'cols': [13, 20], 'start': 17}, // D17-D24
+      {'row': 15, 'cols': [13, 20], 'start': 25}, // D25-D32
+      {'row': 17, 'cols': [13, 20], 'start': 33}, // D33-D40
+      {'row': 18, 'cols': [13, 20], 'start': 41}, // D41-D48
+    ]);
+    
+    // Lab 3: V-AG (22-33), Rows 2-3,5-6, 46 desks (2 pillars at V5, W5)
+    _addLabDesks(coords, 3, [
+      {'row': 2, 'cols': [22, 33], 'start': 1},   // D1-D12
+      {'row': 3, 'cols': [22, 33], 'start': 13},  // D13-D24
+      {'row': 5, 'cols': [22, 33], 'start': 25, 'pillars': [22, 23]}, // D25-D36, skip V5/W5
+      {'row': 6, 'cols': [22, 33], 'start': 35},  // D35-D46
+    ]);
+    
+    // Lab 4: V-AG (22-33), Rows 8-9,11-12, 46 desks (2 pillars at V12, W12)
+    _addLabDesks(coords, 4, [
+      {'row': 8, 'cols': [22, 33], 'start': 1},   // D1-D12
+      {'row': 9, 'cols': [22, 33], 'start': 13},  // D13-D24
+      {'row': 11, 'cols': [22, 33], 'start': 25}, // D25-D36 (no pillars on row 11)
+      {'row': 12, 'cols': [22, 33], 'start': 37, 'pillars': [22, 23]}, // D37-D46, skip V12/W12
+    ]);
+    
+    // Lab 5: V-AG (22-33), Rows 14-15,17-18, 48 desks
+    _addLabDesks(coords, 5, [
+      {'row': 14, 'cols': [22, 33], 'start': 1},  // D1-D12
+      {'row': 15, 'cols': [22, 33], 'start': 13}, // D13-D24
+      {'row': 17, 'cols': [22, 33], 'start': 25}, // D25-D36
+      {'row': 18, 'cols': [22, 33], 'start': 37}, // D37-D48
+    ]);
+    
+    // Add pillar markers (non-interactive structural elements)
+    coords['PILLAR_V5'] = const Offset(22, 5);
+    coords['PILLAR_W5'] = const Offset(23, 5);
+    coords['PILLAR_V12'] = const Offset(22, 12);
+    coords['PILLAR_W12'] = const Offset(23, 12);
+    
+    return coords;
+  }
+  
+  /// Helper to add a lab's desks to the coordinate map.
+  static void _addLabDesks(
+    Map<String, Offset> coords,
+    int labNum,
+    List<Map<String, dynamic>> rows,
+  ) {
+    for (final rowConfig in rows) {
+      final int row = rowConfig['row'];
+      final List<int> colRange = rowConfig['cols'];
+      int deskNum = rowConfig['start'];
+      final List<int>? pillarCols = rowConfig['pillars'];
+      
+      for (int col = colRange[0]; col <= colRange[1]; col++) {
+        // Skip pillars
+        if (pillarCols != null && pillarCols.contains(col)) {
+          continue;
+        }
+        
+        final deskId = 'L${labNum}_D${deskNum.toString().padLeft(2, '0')}';
+        coords[deskId] = Offset(col.toDouble(), row.toDouble());
+        deskNum++;
+      }
+    }
+  }
+  
+  /// Returns the lab number from a desk ID (e.g., 'L3_D25' → 3).
+  int _getLabNumber(String deskId) {
+    final match = RegExp(r'L(\d+)_D\d+').firstMatch(deskId);
+    return match != null ? int.parse(match.group(1)!) : 0;
+  }
+  
+  /// Returns ACT theme color for a lab.
+  Color _getLabColor(int labNum) {
+    switch (labNum) {
+      case 1: return const Color(0xFF1E88E5); // Blue
+      case 2: return const Color(0xFF43A047); // Green
+      case 3: return const Color(0xFFE53935); // Red
+      case 4: return const Color(0xFFFB8C00); // Orange
+      case 5: return const Color(0xFF8E24AA); // Purple
+      case 6: return const Color(0xFF00ACC1); // Cyan
+      case 7: return const Color(0xFFFDD835); // Yellow
+      default: return Colors.grey;
+    }
+  }
+
+  /// Handles taps on the infinite canvas in Edit Mode.
+  void _handleCanvasTap(TapUpDetails details) {
+    if (!isEditMode) return;
+    final localPos = details.localPosition;
+    
+    // Account for offset (canvas starts at col 2, row 2)
+    const double offsetX = 2.0;
+    const double offsetY = 2.0;
+    
+    final int gridX = (localPos.dx / gridCellSize).floor() + offsetX.toInt();
+    final int gridY = (localPos.dy / gridCellSize).floor() + offsetY.toInt();
+    final tapCell = Offset(gridX.toDouble(), gridY.toDouble());
+
+    setState(() {
+      // Toggle: if a desk exists at this cell, remove it; otherwise add one.
+      final existing = deskLayouts.entries
+          .where((e) => e.value == tapCell && !e.key.startsWith('PILLAR_'))
+          .map((e) => e.key)
+          .toList();
+
+      if (existing.isNotEmpty) {
+        for (final key in existing) {
+          deskLayouts.remove(key);
+        }
+      } else {
+        // In edit mode, allow adding custom desks
+        final id = 'CUSTOM_${(deskLayouts.length + 1).toString().padLeft(3, '0')}';
+        deskLayouts[id] = tapCell;
+      }
+    });
+  }
+
+  /// Builds the blueprint-style infinite canvas inside the InteractiveViewer.
+  Widget _buildInfiniteCanvas() {
+    // Canvas sized exactly to lab content (cols 2-33, rows 2-18)
+    // 32 columns × 100px = 3200px width
+    // 17 rows × 100px = 1700px height
+    const double canvasWidth = 3200.0;
+    const double canvasHeight = 1700.0;
+    
+    // Offset to shift coordinates (labs start at col 2, row 2)
+    const double offsetX = 2.0 * gridCellSize; // 200px
+    const double offsetY = 2.0 * gridCellSize; // 200px
+
+    return InteractiveViewer(
+      transformationController: _transformationController,
+      constrained: false,
+      boundaryMargin: const EdgeInsets.all(100),
+      minScale: 0.2, // Will be overridden by _enforceMinScale
+      maxScale: 5.0,
+      panEnabled: !isEditMode,
+      child: GestureDetector(
+        onTapUp: _handleCanvasTap,
+        child: Container(
+          width: canvasWidth,
+          height: canvasHeight,
+          color: const Color(0xFFF5F5F5), // Off-white background
+          child: CustomPaint(
+            painter: _GridPainter(cellSize: gridCellSize),
+            child: Stack(
+              children: deskLayouts.entries.map((entry) {
+                final id = entry.key;
+                final cell = entry.value;
+                
+                // Adjust position by subtracting offset (shift from col 2, row 2 to 0, 0)
+                final adjustedX = (cell.dx * gridCellSize) - offsetX;
+                final adjustedY = (cell.dy * gridCellSize) - offsetY;
+                
+                // Render pillars differently
+                if (id.startsWith('PILLAR_')) {
+                  return Positioned(
+                    left: adjustedX,
+                    top: adjustedY,
+                    child: _buildPillar(),
+                  );
+                }
+                
+                return Positioned(
+                  left: adjustedX,
+                  top: adjustedY,
+                  child: _buildCanvasDesk(id),
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+  
+  /// A pillar (structural obstruction, no interaction).
+  Widget _buildPillar() {
+    return Container(
+      width: gridCellSize,
+      height: gridCellSize,
+      decoration: BoxDecoration(
+        color: const Color(0xFF6B7280), // Solid gray
+        border: Border.all(color: const Color(0xFFD1D5DB), width: 1),
+      ),
+      child: Center(
+        child: Icon(
+          Icons.block,
+          color: const Color(0xFF9CA3AF),
+          size: 32,
+        ),
+      ),
+    );
+  }
+
+  /// A single desk tile on the infinite canvas.
+  Widget _buildCanvasDesk(String deskId) {
+    final isSelected = _selectedDeskId == deskId;
+    
+    return DragTarget<Map<String, dynamic>>(
+      onWillAccept: (data) => true,
+      onAccept: (draggedComponent) async {
+        await _handleComponentDrop(draggedComponent, deskId);
+      },
+      builder: (context, candidateData, _) {
+        final isHovering = candidateData.isNotEmpty;
+        
+        return GestureDetector(
+          onTap: isEditMode
+              ? null // taps handled by canvas GestureDetector in edit mode
+              : () => _loadDeskComponents(deskId),
+          child: AnimatedScale(
+            scale: isSelected ? 1.1 : 1.0, // Pulse animation: 1.0 → 1.1 → 1.0
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+            child: Container(
+              width: gridCellSize,
+              height: gridCellSize,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFFFFF), // Solid white (no conditional coloring)
+                border: Border.all(
+                  color: isHovering 
+                      ? const Color(0xFF000000) // Black border on hover
+                      : const Color(0xFFD1D5DB), // Gray border default
+                  width: isHovering ? 2 : 1,
+                ),
+              ),
+              child: Center(
+                child: Text(
+                  deskId,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w400,
+                    color: Color(0xFF374151), // Dark gray text
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /// Handles taps on the infinite canvas in Edit Mode.
+  // ──────────────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -2088,13 +2663,44 @@ class _InteractiveMapScreenState extends State<InteractiveMapScreen> {
                     const SizedBox(width: 16),
                     // Only show zoom buttons in map mode
                     if (activeView == 'Map') ...[
+                      // Edit Mode Toggle
+                      Container(
+                        margin: const EdgeInsets.only(right: 8),
+                        decoration: BoxDecoration(
+                          color: isEditMode ? Colors.black : Colors.white,
+                          border: Border.all(color: Colors.black, width: 2),
+                        ),
+                        child: InkWell(
+                          onTap: () => setState(() => isEditMode = !isEditMode),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  isEditMode ? Icons.edit_off : Icons.edit,
+                                  size: 18,
+                                  color: isEditMode ? Colors.white : Colors.black,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  isEditMode ? 'EDITING' : 'EDIT',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: isEditMode ? Colors.white : Colors.black,
+                                    letterSpacing: 1.0,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                       IconButton(
-                        icon: const Icon(Icons.zoom_out),
-                        onPressed: () {
-                          final matrix = _transformationController.value.clone();
-                          matrix.scale(0.8);
-                          _transformationController.value = matrix;
-                        },
+                        icon: const Icon(Icons.zoom_out_map),
+                        onPressed: _fitAllLabs,
+                        tooltip: 'Fit All Labs',
                         style: IconButton.styleFrom(
                           side: const BorderSide(color: Colors.black, width: 1),
                           shape: const RoundedRectangleBorder(
@@ -2176,104 +2782,7 @@ class _InteractiveMapScreenState extends State<InteractiveMapScreen> {
                   else if (_isLoading)
                     const Center(child: CircularProgressIndicator(color: Colors.black))
                   else
-                    InteractiveViewer(
-                      transformationController: _transformationController,
-                      constrained: false,
-                      minScale: 0.3,
-                      maxScale: 2.5,
-                      boundaryMargin: const EdgeInsets.all(200),
-                      child: Container(
-                        color: Colors.grey.shade100,
-                        padding: const EdgeInsets.all(40),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                // Wing A (Left): Lab 6 & Lab 7
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    _buildLab('Lab 6', 6, [
-                                      [2, 10],
-                                      [2, 10],
-                                      [1, 8],
-                                    ]),
-                                    SizedBox(height: aisleHeight), // Aisle between labs
-                                    _buildLab('Lab 7', 7, [
-                                      [2, 6],
-                                      [2, 6],
-                                      [2, 6],
-                                      [2, 6],
-                                    ], showLabel: false), // No label, continues from Lab 6
-                                  ],
-                                ),
-
-                                const SizedBox(width: 60),
-
-                                // Wing B (Right): Absolute positioning for perfect alignment
-                                SizedBox(
-                                  width: 1200, // Wide enough for both columns
-                                  height: 1400, // Tall enough for all labs
-                                  child: Stack(
-                                    children: [
-                                      // Lab 1 - Left column, starts at slot1Y
-                                      Positioned(
-                                        left: 0,
-                                        top: slot1Y,
-                                        child: _buildLab('Lab 1', 1, [
-                                          [2, 8],
-                                          [2, 8],
-                                          [2, 8],
-                                        ]),
-                                      ),
-
-                                      // Lab 3 - Right column, starts at slot1Y (same as Lab 1)
-                                      Positioned(
-                                        left: 500,
-                                        top: slot1Y,
-                                        child: _buildLab('Lab 3', 3, [
-                                          [2, 12],
-                                          [2, 12],
-                                        ]),
-                                      ),
-
-                                      // Lab 2 - Left column, starts at slot4Y
-                                      Positioned(
-                                        left: 0,
-                                        top: slot4Y,
-                                        child: _buildLab('Lab 2', 2, [
-                                          [2, 8],
-                                          [2, 8],
-                                          [2, 8],
-                                        ]),
-                                      ),
-
-                                      // Lab 4 - Right column, starts at slot3Y (aligned with L1-B3)
-                                      Positioned(
-                                        left: 500,
-                                        top: slot3Y,
-                                        child: _buildLab('Lab 4', 4, [
-                                          [2, 12],
-                                          [2, 12],
-                                        ]),
-                                      ),
-
-                                      // Lab 5 - Right column, starts at slot5Y (aligned with L2-B2)
-                                      Positioned(
-                                        left: 500,
-                                        top: slot5Y,
-                                        child: _buildLab('Lab 5', 5, [
-                                          [2, 12],
-                                          [2, 12],
-                                        ]),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
+                    _buildInfiniteCanvas(),
                   
                   // Global Ghost Overlay - appears when dragging after modal closes
                   if (_draggingComponent != null)
@@ -2382,10 +2891,10 @@ class _InteractiveMapScreenState extends State<InteractiveMapScreen> {
                     ),
                   
                   // RETIRED ZONE / THE PIT (Bottom-Left) - Phase 4: Spatial Status Logic
-                  if (activeView == 'Map')
+                  if (activeView == 'Map' && !_isInspectorOpen)
                     Positioned(
                       left: 20,
-                      bottom: 320, // Above the dock
+                      bottom: 20,
                       child: DragTarget<Map<String, dynamic>>(
                         onWillAccept: (data) => data != null,
                         onAccept: (draggedComponent) async {
@@ -2440,13 +2949,14 @@ class _InteractiveMapScreenState extends State<InteractiveMapScreen> {
                       ),
                     ),
                   
-                  // In-Screen Dock at bottom
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: _buildDock(),
-                  ),
+                  // ── Phase 6: Inspector Panel (Right-Aligned, 40% width) ──────
+                  if (_isInspectorOpen && activeView == 'Map')
+                    Positioned(
+                      top: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: _buildInspectorPanel(),
+                    ),
                 ],
               ),
             ),
@@ -2455,6 +2965,253 @@ class _InteractiveMapScreenState extends State<InteractiveMapScreen> {
       ),
     );
   }
+  
+  /// Inspector Panel: Right-aligned split-view for desk inspection
+  Widget _buildInspectorPanel() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final panelWidth = screenWidth * inspectorPanelWidth;
+    
+    return Container(
+      width: panelWidth,
+      decoration: const BoxDecoration(
+        color: Color(0xFFF5F5F5), // Light gray background
+        border: Border(
+          left: BorderSide(color: Color(0xFFD1D5DB), width: 1), // Swiss border
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: const BoxDecoration(
+              color: Color(0xFFFFFFFF),
+              border: Border(
+                bottom: BorderSide(color: Color(0xFFD1D5DB), width: 1),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  _activeDeskId ?? 'Unknown',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w300,
+                    letterSpacing: 1.5,
+                    color: Color(0xFF111827),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 20, color: Color(0xFF374151)),
+                  onPressed: _closeInspector,
+                  tooltip: 'Close Inspector',
+                ),
+              ],
+            ),
+          ),
+          
+          // Visual Desk Layout
+          Expanded(
+            child: _activeDeskComponents.isEmpty
+                ? const Center(
+                    child: Text(
+                      'Empty Workstation',
+                      style: TextStyle(
+                        color: Color(0xFF9CA3AF),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w300,
+                      ),
+                    ),
+                  )
+                : _buildVisualDeskLayout(),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  /// Build visual desk layout with component blocks
+  Widget _buildVisualDeskLayout() {
+    // Helper to find component by category
+    Map<String, dynamic>? findComponent(String category) {
+      try {
+        return _activeDeskComponents.firstWhere(
+          (c) => c['category']?.toString().toLowerCase() == category.toLowerCase(),
+        );
+      } catch (e) {
+        return null;
+      }
+    }
+    
+    final keyboard = findComponent('Keyboard');
+    final mouse = findComponent('Mouse');
+    final monitor = findComponent('Monitor');
+    final systemUnit = findComponent('System Unit');
+    final ssd = findComponent('SSD');
+    final avr = findComponent('AVR');
+    
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        children: [
+          // Row 1: Keyboard and Mouse
+          Expanded(
+            flex: 15,
+            child: Row(
+              children: [
+                // Keyboard (70% width)
+                Expanded(
+                  flex: 7,
+                  child: _buildComponentBlock(
+                    'KEYBOARD',
+                    'K',
+                    keyboard,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // Mouse (30% width)
+                Expanded(
+                  flex: 3,
+                  child: _buildComponentBlock(
+                    'MOUSE',
+                    'M',
+                    mouse,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          
+          // Row 2: Monitor
+          Expanded(
+            flex: 30,
+            child: _buildComponentBlock(
+              'MONITOR',
+              'MR',
+              monitor,
+            ),
+          ),
+          const SizedBox(height: 12),
+          
+          // Row 3: System Unit with SSD
+          Expanded(
+            flex: 30,
+            child: Row(
+              children: [
+                // System Unit (75% width)
+                Expanded(
+                  flex: 75,
+                  child: _buildComponentBlock(
+                    'SYSTEM UNIT',
+                    'SU',
+                    systemUnit,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // SSD (25% width)
+                Expanded(
+                  flex: 25,
+                  child: _buildComponentBlock(
+                    'SSD',
+                    'S',
+                    ssd,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          
+          // Row 4: AVR
+          Expanded(
+            flex: 15,
+            child: _buildComponentBlock(
+              'AVR',
+              'AVR',
+              avr,
+            ),
+          ),
+          const SizedBox(height: 24),
+          
+          // Close Button
+          SizedBox(
+            height: 50,
+            child: ElevatedButton(
+              onPressed: _closeInspector,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF374151),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(25),
+                ),
+                elevation: 0,
+              ),
+              child: const Text(
+                'CLOSE',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.5,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  /// Build a single component block
+  Widget _buildComponentBlock(String label, String abbreviation, Map<String, dynamic>? component) {
+    final hasComponent = component != null;
+    
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF374151),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Center(
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w500,
+            color: Colors.white,
+            letterSpacing: 1.0,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Phase 5: Swiss-style grid painter for the infinite canvas
+class _GridPainter extends CustomPainter {
+  final double cellSize;
+  _GridPainter({required this.cellSize});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final gridPaint = Paint()
+      ..color = const Color(0xFFE5E7EB) // Light gray grid lines
+      ..strokeWidth = 0.5;
+
+    // Draw vertical lines
+    for (double x = 0; x < size.width; x += cellSize) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
+    }
+    // Draw horizontal lines
+    for (double y = 0; y < size.height; y += cellSize) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _GridPainter old) => old.cellSize != cellSize;
 }
 
 // PHASE 4: SPATIAL STATUS LOGIC - Dashed Border Painter for Borrowed/Retired Zones

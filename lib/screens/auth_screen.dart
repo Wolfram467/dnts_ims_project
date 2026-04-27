@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'dashboard_screen.dart';
+import 'main_layout.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -55,6 +55,13 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Future<void> _handleSubmit() async {
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🚨 TEMPORARY AUTO-LOGIN FOR TESTING - REMOVE BEFORE PRODUCTION 🚨
+    // ═══════════════════════════════════════════════════════════════════════
+    _emailController.text = 'a3d8m4i2n@gmail.com';
+    _passwordController.text = '544f5d6s20.';
+    // ═══════════════════════════════════════════════════════════════════════
+    
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -73,7 +80,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
         if (response.user != null && mounted) {
           Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const DashboardScreen()),
+            MaterialPageRoute(builder: (_) => const MainLayout()),
           );
         }
       } else {
