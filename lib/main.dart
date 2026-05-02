@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/auth_screen.dart';
+import 'data/lab_data_generator.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -10,6 +11,14 @@ Future<void> main() async {
     url: 'https://wycbnxuhzemgkfebzfmz.supabase.co',
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5Y2JueHVoemVtZ2tmZWJ6Zm16Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5MDE2MzgsImV4cCI6MjA5MjQ3NzYzOH0.Df5rENWQ8_xwd6tNQG4x68sAR_MxZMqb7tsJPDnGoKA',
   );
+
+  // Auto-seed labs 1-4 on first launch
+  final isSeeded = await LabDataGenerator.isAutoSeeded();
+  if (!isSeeded) {
+    await LabDataGenerator.autoSeedAllLabs();
+  } else {
+    print('✓ Labs already seeded, skipping auto-seed');
+  }
 
   runApp(const ProviderScope(child: DNTSApp()));
 }
