@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/map_state_provider.dart';
+import '../models/hardware_component.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PERFORMANCE OPTIMIZATION: ISOLATED DESK WIDGET
@@ -25,7 +26,7 @@ class DeskWidget extends ConsumerWidget {
   final VoidCallback onTap;
 
   /// Callback when component is dropped on this desk
-  final Future<void> Function(Map<String, dynamic> component) onComponentDrop;
+  final Future<void> Function(HardwareComponent component) onComponentDrop;
 
   const DeskWidget({
     super.key,
@@ -53,7 +54,7 @@ class DeskWidget extends ConsumerWidget {
     // The desk doesn't visually change when it becomes active
     // Only the inspector panel needs to know about the active desk
 
-    return DragTarget<Map<String, dynamic>>(
+    return DragTarget<HardwareComponent>(
       onWillAccept: (data) => true,
       onAccept: (draggedComponent) async {
         await onComponentDrop(draggedComponent);

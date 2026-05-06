@@ -1,32 +1,31 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Notifier to manage the application theme state (Light/Dark mode)
+/// Notifier to manage the theme state (Dark Mode vs Light Mode)
 class ThemeNotifier extends Notifier<bool> {
   static const String _storageKey = 'is_dark_mode';
 
   @override
   bool build() {
-    // Default to light mode (false)
+    // Initial state is light mode (false)
     return false;
   }
 
-  /// Load theme preference from local storage
+  /// Load theme preference from SharedPreferences
   Future<void> initializeTheme() async {
-    final preferences = await SharedPreferences.getInstance();
-    state = preferences.getBool(_storageKey) ?? false;
+    final sharedPreferences = await SharedPreferences.getInstance();
+    state = sharedPreferences.getBool(_storageKey) ?? false;
   }
 
-  /// Flip the theme state and persist to local storage
+  /// Toggle between light and dark mode
   Future<void> toggleTheme() async {
-    final newState = !state;
-    state = newState;
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setBool(_storageKey, newState);
+    state = !state;
+    final sharedPreferences = await SharedPreferences.getInstance();
+    await sharedPreferences.setBool(_storageKey, state);
   }
 }
 
-/// Global provider for the theme state
+/// Provider for the application theme state
 final themeProvider = NotifierProvider<ThemeNotifier, bool>(() {
   return ThemeNotifier();
 });

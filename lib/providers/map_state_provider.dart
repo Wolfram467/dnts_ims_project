@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/hardware_component.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PHASE 2: STATE MANAGEMENT MIGRATION
@@ -8,14 +9,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// Manages the currently dragging component during drag-and-drop operations.
 /// This is the "Global Handoff State" for drag feedback.
-class DraggingComponentNotifier extends Notifier<Map<String, dynamic>?> {
+class DraggingComponentNotifier extends Notifier<HardwareComponent?> {
   @override
-  Map<String, dynamic>? build() {
+  HardwareComponent? build() {
     return null; // No component being dragged initially
   }
 
   /// Set the component being dragged
-  void setDraggingComponent(Map<String, dynamic>? component) {
+  void setDraggingComponent(HardwareComponent? component) {
     state = component;
   }
 
@@ -30,7 +31,7 @@ class DraggingComponentNotifier extends Notifier<Map<String, dynamic>?> {
 
 /// Provider for the dragging component state
 final draggingComponentProvider =
-    NotifierProvider<DraggingComponentNotifier, Map<String, dynamic>?>(
+    NotifierProvider<DraggingComponentNotifier, HardwareComponent?>(
   () => DraggingComponentNotifier(),
 );
 
@@ -128,14 +129,14 @@ final inspectorStateProvider = NotifierProvider<InspectorStateNotifier, bool>(
 /// Manages the list of components for the currently active desk.
 /// This is loaded when a desk is clicked and displayed in the inspector panel.
 class ActiveDeskComponentsNotifier
-    extends Notifier<List<Map<String, dynamic>>> {
+    extends Notifier<List<HardwareComponent>> {
   @override
-  List<Map<String, dynamic>> build() {
+  List<HardwareComponent> build() {
     return []; // Empty list initially
   }
 
   /// Set the components for the active desk
-  void setComponents(List<Map<String, dynamic>> components) {
+  void setComponents(List<HardwareComponent> components) {
     state = components;
   }
 
@@ -145,19 +146,19 @@ class ActiveDeskComponentsNotifier
   }
 
   /// Add a component to the list
-  void addComponent(Map<String, dynamic> component) {
+  void addComponent(HardwareComponent component) {
     state = [...state, component];
   }
 
   /// Remove a component by serial number
   void removeComponent(String dntsSerial) {
     state = state
-        .where((component) => component['dnts_serial'] != dntsSerial)
+        .where((component) => component.dntsSerial != dntsSerial)
         .toList();
   }
 
   /// Update a component at a specific index
-  void updateComponent(int index, Map<String, dynamic> updatedComponent) {
+  void updateComponent(int index, HardwareComponent updatedComponent) {
     if (index >= 0 && index < state.length) {
       final newList = [...state];
       newList[index] = updatedComponent;
@@ -168,7 +169,7 @@ class ActiveDeskComponentsNotifier
 
 /// Provider for the active desk components
 final activeDeskComponentsProvider =
-    NotifierProvider<ActiveDeskComponentsNotifier, List<Map<String, dynamic>>>(
+    NotifierProvider<ActiveDeskComponentsNotifier, List<HardwareComponent>>(
   () => ActiveDeskComponentsNotifier(),
 );
 
@@ -297,6 +298,12 @@ final isInspectorActiveProvider = Provider<bool>((ref) {
 
 /// Provider for triggering a data refresh across the application
 final refreshTriggerProvider = StateProvider<int>((ref) => 0);
+
+/// Tracks the source workstation ID during a drag operation.
+final sourceWorkstationProvider = StateProvider<String?>((ref) => null);
+
+/// Manages the currently selected facility for spatial filtering.
+final selectedFacilityProvider = StateProvider<String>((ref) => 'CT1');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CAMERA CONTROL PROVIDER

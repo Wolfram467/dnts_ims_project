@@ -132,31 +132,26 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
                 ),
               ),
             ),
-            trailing: Expanded(
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: Icon(
-                          ref.watch(themeProvider) ? Icons.light_mode : Icons.dark_mode,
-                          color: Colors.grey.shade500,
-                        ),
-                        tooltip: 'Toggle Theme',
-                        onPressed: () => ref.read(themeProvider.notifier).toggleTheme(),
-                      ),
-                      const SizedBox(height: 16),
-                      IconButton(
-                        icon: Icon(Icons.logout, color: Colors.grey.shade500),
-                        tooltip: 'Logout',
-                        onPressed: _handleLogout,
-                      ),
-                    ],
+            trailing: Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      ref.watch(themeProvider) ? Icons.light_mode : Icons.dark_mode,
+                      color: Colors.grey.shade500,
+                    ),
+                    tooltip: 'Toggle Theme',
+                    onPressed: () => ref.read(themeProvider.notifier).toggleTheme(),
                   ),
-                ),
+                  const SizedBox(height: 16),
+                  IconButton(
+                    icon: Icon(Icons.logout, color: Colors.grey.shade500),
+                    tooltip: 'Logout',
+                    onPressed: _handleLogout,
+                  ),
+                ],
               ),
             ),
             destinations: const [

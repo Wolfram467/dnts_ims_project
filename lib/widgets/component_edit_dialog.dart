@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import '../utils/workstation_repository.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/repository_providers.dart';
+import '../models/hardware_component.dart';
 
 /// ============================================================================
 /// COMPONENT EDIT DIALOG
@@ -10,9 +12,9 @@ import '../utils/workstation_repository.dart';
 /// - Status (dropdown)
 /// ============================================================================
 
-class ComponentEditDialog extends StatefulWidget {
+class ComponentEditDialog extends ConsumerStatefulWidget {
   final String workstationIdentifier;
-  final Map<String, dynamic> component;
+  final HardwareComponent component;
   final VoidCallback onSaved;
 
   const ComponentEditDialog({
@@ -23,10 +25,10 @@ class ComponentEditDialog extends StatefulWidget {
   });
 
   @override
-  State<ComponentEditDialog> createState() => _ComponentEditDialogState();
+  ConsumerState<ComponentEditDialog> createState() => _ComponentEditDialogState();
 }
 
-class _ComponentEditDialogState extends State<ComponentEditDialog> {
+class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
   late TextEditingController _dntsSerialNumberController;
   late TextEditingController _manufacturingSerialNumberController;
   late String _selectedDeploymentStatus;
@@ -48,12 +50,12 @@ class _ComponentEditDialogState extends State<ComponentEditDialog> {
   void initState() {
     super.initState();
     _dntsSerialNumberController = TextEditingController(
-      text: widget.component['dnts_serial'] ?? '',
+      text: widget.component.dntsSerial,
     );
     _manufacturingSerialNumberController = TextEditingController(
-      text: widget.component['mfg_serial'] ?? '',
+      text: widget.component.mfgSerial,
     );
-    _selectedDeploymentStatus = widget.component['status'] ?? 'Deployed';
+    _selectedDeploymentStatus = widget.component.status;
   }
 
   @override
@@ -65,8 +67,10 @@ class _ComponentEditDialogState extends State<ComponentEditDialog> {
 
   /// Validate DNTS serial format and uniqueness
   Future<bool> _validateDntsSerialNumber(String serialNumber) async {
+    final repository = ref.read(workstationRepositoryProvider);
+
     // Check format
-    if (!WorkstationRepository.isValidDntsSerialNumber(serialNumber)) {
+    if (!repository.isValidDntsSerialNumber(serialNumber)) {
       setState(() {
         _dntsSerialNumberErrorText = 'Invalid format. Expected: CT1_LAB#_[MR|M|K|SU|SSD|AVR]##';
       });
@@ -74,10 +78,10 @@ class _ComponentEditDialogState extends State<ComponentEditDialog> {
     }
 
     // Check uniqueness within the lab
-    final isSerialNumberUnique = await WorkstationRepository.isDntsSerialNumberUnique(
+    final isSerialNumberUnique = await repository.isDntsSerialNumberUnique(
       serialNumber,
       widget.workstationIdentifier,
-      widget.component['category'],
+      widget.component.category,
     );
 
     if (!isSerialNumberUnique) {
@@ -112,15 +116,16 @@ class _ComponentEditDialogState extends State<ComponentEditDialog> {
     });
 
     // Create updated component
-    final updatedComponent = Map<String, dynamic>.from(widget.component);
-    updatedComponent['dnts_serial'] = dntsSerialNumber;
-    updatedComponent['mfg_serial'] = _manufacturingSerialNumberController.text.trim();
-    updatedComponent['status'] = _selectedDeploymentStatus;
+    final updatedComponent = widget.component.copyWith(
+      dntsSerial: dntsSerialNumber,
+      mfgSerial: _manufacturingSerialNumberController.text.trim(),
+      status: _selectedDeploymentStatus,
+    );
 
     // Save to storage
-    final wasUpdateSuccessful = await WorkstationRepository.updateWorkstationComponent(
+    final wasUpdateSuccessful = await ref.read(workstationRepositoryProvider).updateWorkstationComponent(
       widget.workstationIdentifier,
-      widget.component['category'],
+      widget.component.category,
       updatedComponent,
     );
 
@@ -133,7 +138,7 @@ class _ComponentEditDialogState extends State<ComponentEditDialog> {
         // Show success message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('✓ ${widget.component['category']} updated successfully'),
+            content: Text('✓ ${widget.component.category} updated successfully'),
             backgroundColor: Colors.green,
             duration: const Duration(seconds: 2),
           ),
@@ -179,7 +184,7 @@ class _ComponentEditDialogState extends State<ComponentEditDialog> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Edit ${widget.component['category']}',
+                    'Edit ${widget.component.category}',
                     style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w600,

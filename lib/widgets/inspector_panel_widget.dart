@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/map_state_provider.dart';
-import '../utils/workstation_repository.dart';
+import '../providers/repository_providers.dart';
+import '../models/hardware_component.dart';
 import 'component_edit_dialog.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -125,7 +126,7 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
   Widget _buildVisualWorkstationLayout(
     BuildContext context,
     String workstationIdentifier,
-    List<Map<String, dynamic>> workstationComponents,
+    List<HardwareComponent> workstationComponents,
   ) {
     return Padding(
       padding: const EdgeInsets.all(24),
@@ -187,14 +188,14 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
   Widget _buildComponentSlotContent(
     BuildContext context,
     String workstationIdentifier,
-    List<Map<String, dynamic>> workstationComponents,
+    List<HardwareComponent> workstationComponents,
     String targetCategory, {
     bool isNestedComponent = false,
   }) {
-    Map<String, dynamic>? foundComponent;
+    HardwareComponent? foundComponent;
     try {
       foundComponent = workstationComponents.firstWhere(
-        (component) => component['category']?.toString().toLowerCase() == targetCategory.toLowerCase(),
+        (component) => component.category.toLowerCase() == targetCategory.toLowerCase(),
       );
     } catch (_) {
       foundComponent = null;
@@ -233,7 +234,7 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
                     borderRadius: BorderRadius.zero,
                   ),
                   child: Text(
-                    isComponentFound ? (foundComponent['status'] ?? 'Deployed').toUpperCase() : 'NOT FOUND',
+                    isComponentFound ? (foundComponent.status).toUpperCase() : 'NOT FOUND',
                     style: const TextStyle(
                       fontSize: 8,
                       fontWeight: FontWeight.w900,
@@ -252,7 +253,7 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  isComponentFound ? 'DNTS: ${foundComponent['dnts_serial'] ?? 'N/A'}' : 'Empty Slot',
+                  isComponentFound ? 'DNTS: ${foundComponent.dntsSerial}' : 'Empty Slot',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w400,
@@ -272,7 +273,7 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
   Widget _buildComponentSlot(
     BuildContext context,
     String workstationIdentifier,
-    List<Map<String, dynamic>> workstationComponents,
+    List<HardwareComponent> workstationComponents,
     String targetCategory,
   ) {
     return Container(
@@ -289,7 +290,7 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
   Widget _buildSystemUnitWithNestedSsdSlot(
     BuildContext context,
     String workstationIdentifier,
-    List<Map<String, dynamic>> workstationComponents,
+    List<HardwareComponent> workstationComponents,
   ) {
     return Container(
       decoration: BoxDecoration(
@@ -349,7 +350,7 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
   void _openComponentEditDialog(
     BuildContext context,
     String workstationIdentifier,
-    Map<String, dynamic> component,
+    HardwareComponent component,
   ) {
     showDialog(
       context: context,
@@ -363,7 +364,7 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
 
   /// Refresh workstation data after edit
   Future<void> _refreshWorkstationData(String workstationIdentifier) async {
-    final workstationComponents = await WorkstationRepository.getWorkstationComponents(workstationIdentifier);
+    final workstationComponents = await ref.read(workstationRepositoryProvider).getWorkstationComponents(workstationIdentifier);
     if (workstationComponents != null && mounted) {
       ref.read(activeDeskComponentsProvider.notifier).setComponents(workstationComponents);
     }
@@ -438,4 +439,3 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
     }
   }
 }
-

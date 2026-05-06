@@ -14,15 +14,15 @@ class DashboardScreen extends StatelessWidget {
             letterSpacing: 2,
           ),
         ),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        foregroundColor: Theme.of(context).colorScheme.onSurface,
         elevation: 0,
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Container(color: Colors.black, height: 1),
+          child: Container(color: Theme.of(context).dividerColor, height: 1),
         ),
       ),
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -67,33 +67,38 @@ class _AssetOverviewSection extends StatelessWidget {
     return Card(
       elevation: 0,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       child: Container(
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.black, width: 1),
+          border: Border.all(color: Theme.of(context).dividerColor, width: 1),
         ),
         padding: const EdgeInsets.all(32),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'ASSET OVERVIEW',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 2.0,
-                color: Colors.black,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
             const SizedBox(height: 32),
-            _buildGlobalCapacity(),
+            _buildGlobalCapacity(context),
             const SizedBox(height: 48),
-            const Text(
+            Text(
               'COMPONENT DISTRIBUTION (6 SLOTS PER DESK)',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.5, color: Colors.black54),
+              style: TextStyle(
+                fontSize: 12, 
+                fontWeight: FontWeight.bold, 
+                letterSpacing: 1.5, 
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+              ),
             ),
             const SizedBox(height: 16),
-            _buildComponentBreakdown(),
+            _buildComponentBreakdown(context),
             const SizedBox(height: 48),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -103,12 +108,17 @@ class _AssetOverviewSection extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'LABORATORY SATURATION',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.5, color: Colors.black54),
+                        style: TextStyle(
+                          fontSize: 12, 
+                          fontWeight: FontWeight.bold, 
+                          letterSpacing: 1.5, 
+                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                        ),
                       ),
                       const SizedBox(height: 16),
-                      _buildLaboratorySaturation(),
+                      _buildLaboratorySaturation(context),
                     ],
                   ),
                 ),
@@ -118,12 +128,17 @@ class _AssetOverviewSection extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'STATUS & HEALTH',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.5, color: Colors.black54),
+                        style: TextStyle(
+                          fontSize: 12, 
+                          fontWeight: FontWeight.bold, 
+                          letterSpacing: 1.5, 
+                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                        ),
                       ),
                       const SizedBox(height: 16),
-                      _buildStatusGlance(),
+                      _buildStatusGlance(context),
                     ],
                   ),
                 ),
@@ -135,30 +150,38 @@ class _AssetOverviewSection extends StatelessWidget {
     );
   }
 
-  Widget _buildGlobalCapacity() {
+  Widget _buildGlobalCapacity(BuildContext context) {
     return Row(
       children: [
-        Expanded(child: _buildCapacityGauge('TOTAL WORKSTATIONS', deployedDesks, totalDesks, 'Desks Available')),
+        Expanded(child: _buildCapacityGauge(context, 'TOTAL WORKSTATIONS', deployedDesks, totalDesks, 'Desks Available')),
         const SizedBox(width: 32),
-        Expanded(child: _buildCapacityGauge('TOTAL COMPONENTS', deployedComponents, totalComponents, 'Component Slots Open')),
+        Expanded(child: _buildCapacityGauge(context, 'TOTAL COMPONENTS', deployedComponents, totalComponents, 'Component Slots Open')),
       ],
     );
   }
 
-  Widget _buildCapacityGauge(String title, int current, int max, String remainingLabel) {
+  Widget _buildCapacityGauge(BuildContext context, String title, int current, int max, String remainingLabel) {
     final double percentage = current / max;
     final int remaining = max - current;
 
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
-        border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
+        color: Theme.of(context).scaffoldBackgroundColor,
+        border: Border.all(color: Theme.of(context).dividerColor, width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.5, color: Colors.black54)),
+          Text(
+            title, 
+            style: TextStyle(
+              fontSize: 12, 
+              fontWeight: FontWeight.bold, 
+              letterSpacing: 1.5, 
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+            ),
+          ),
           const SizedBox(height: 16),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
@@ -170,68 +193,94 @@ class _AssetOverviewSection extends StatelessWidget {
               const SizedBox(width: 8),
               Text(
                 '/ $max',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w300, color: Colors.black54, height: 1.5),
+                style: TextStyle(
+                  fontSize: 18, 
+                  fontWeight: FontWeight.w300, 
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), 
+                  height: 1.5,
+                ),
               ),
               const Spacer(),
               Text(
                 '${(percentage * 100).toInt()}%',
-                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black),
+                style: TextStyle(
+                  fontSize: 24, 
+                  fontWeight: FontWeight.bold, 
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 16),
           LinearProgressIndicator(
             value: percentage,
-            backgroundColor: const Color(0xFFE5E7EB),
-            color: Colors.black,
+            backgroundColor: Theme.of(context).dividerColor.withOpacity(0.3),
+            color: Theme.of(context).colorScheme.onSurface,
             minHeight: 8,
           ),
           const SizedBox(height: 12),
-          Text('$remaining $remainingLabel', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Colors.black54)),
+          Text(
+            '$remaining $remainingLabel', 
+            style: TextStyle(
+              fontSize: 12, 
+              fontWeight: FontWeight.w500, 
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildComponentBreakdown() {
+  Widget _buildComponentBreakdown(BuildContext context) {
     // 6 components per desk: System Unit, Monitor, Keyboard, Mouse, SSD, AVR
     return Row(
       children: [
-        Expanded(child: _buildComponentCard('System Unit', 300, totalDesks, Icons.computer)),
+        Expanded(child: _buildComponentCard(context, 'System Unit', 300, totalDesks, Icons.computer)),
         const SizedBox(width: 12),
-        Expanded(child: _buildComponentCard('Monitor', 290, totalDesks, Icons.desktop_windows)),
+        Expanded(child: _buildComponentCard(context, 'Monitor', 290, totalDesks, Icons.desktop_windows)),
         const SizedBox(width: 12),
-        Expanded(child: _buildComponentCard('Keyboard', 295, totalDesks, Icons.keyboard)),
+        Expanded(child: _buildComponentCard(context, 'Keyboard', 295, totalDesks, Icons.keyboard)),
         const SizedBox(width: 12),
-        Expanded(child: _buildComponentCard('Mouse', 280, totalDesks, Icons.mouse)),
+        Expanded(child: _buildComponentCard(context, 'Mouse', 280, totalDesks, Icons.mouse)),
         const SizedBox(width: 12),
-        Expanded(child: _buildComponentCard('SSD', 298, totalDesks, Icons.storage)),
+        Expanded(child: _buildComponentCard(context, 'SSD', 298, totalDesks, Icons.storage)),
         const SizedBox(width: 12),
-        Expanded(child: _buildComponentCard('AVR', 285, totalDesks, Icons.power)),
+        Expanded(child: _buildComponentCard(context, 'AVR', 285, totalDesks, Icons.power)),
       ],
     );
   }
 
-  Widget _buildComponentCard(String name, int deployed, int max, IconData icon) {
+  Widget _buildComponentCard(BuildContext context, String name, int deployed, int max, IconData icon) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
+        color: Theme.of(context).colorScheme.surface,
+        border: Border.all(color: Theme.of(context).dividerColor, width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 20, color: Colors.black54),
+          Icon(
+            icon, 
+            size: 20, 
+            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+          ),
           const SizedBox(height: 12),
           Text(name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
           const SizedBox(height: 4),
-          Text('$deployed / $max', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+          Text(
+            '$deployed / $max', 
+            style: TextStyle(
+              fontSize: 12, 
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+            ),
+          ),
           const SizedBox(height: 8),
           LinearProgressIndicator(
             value: deployed / max,
-            backgroundColor: const Color(0xFFE5E7EB),
-            color: Colors.black87,
+            backgroundColor: Theme.of(context).dividerColor.withOpacity(0.3),
+            color: Theme.of(context).colorScheme.onSurface,
             minHeight: 4,
           ),
         ],
@@ -239,29 +288,33 @@ class _AssetOverviewSection extends StatelessWidget {
     );
   }
 
-  Widget _buildLaboratorySaturation() {
+  Widget _buildLaboratorySaturation(BuildContext context) {
     return Column(
       children: [
-        _buildLabBar('Lab 1', 40, 48),
+        _buildLabBar(context, 'Lab 1', 40, 48),
         const SizedBox(height: 12),
-        _buildLabBar('Lab 2', 48, 48),
+        _buildLabBar(context, 'Lab 2', 48, 48),
         const SizedBox(height: 12),
-        _buildLabBar('Lab 3', 12, 46),
+        _buildLabBar(context, 'Lab 3', 12, 46),
         const SizedBox(height: 12),
-        _buildLabBar('Lab 4', 45, 46),
+        _buildLabBar(context, 'Lab 4', 45, 46),
         const SizedBox(height: 12),
-        _buildLabBar('Lab 5', 48, 48),
+        _buildLabBar(context, 'Lab 5', 48, 48),
         const SizedBox(height: 12),
-        _buildLabBar('Lab 6', 30, 48),
+        _buildLabBar(context, 'Lab 6', 30, 48),
         const SizedBox(height: 12),
-        _buildLabBar('Lab 7', 48, 48),
+        _buildLabBar(context, 'Lab 7', 48, 48),
       ],
     );
   }
 
-  Widget _buildLabBar(String labName, int deployed, int max) {
+  Widget _buildLabBar(BuildContext context, String labName, int deployed, int max) {
     final double percentage = deployed / max;
     final bool isFull = deployed == max;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final statusColor = isFull 
+        ? (isDark ? Colors.green.shade400 : Colors.green.shade700)
+        : Theme.of(context).colorScheme.onSurface;
 
     return Row(
       children: [
@@ -272,8 +325,8 @@ class _AssetOverviewSection extends StatelessWidget {
             borderRadius: BorderRadius.zero,
             child: LinearProgressIndicator(
               value: percentage,
-              backgroundColor: const Color(0xFFE5E7EB),
-              color: isFull ? Colors.green.shade700 : Colors.black87,
+              backgroundColor: Theme.of(context).dividerColor.withOpacity(0.3),
+              color: statusColor,
               minHeight: 12,
             ),
           ),
@@ -286,7 +339,9 @@ class _AssetOverviewSection extends StatelessWidget {
             style: TextStyle(
               fontSize: 12,
               fontWeight: isFull ? FontWeight.bold : FontWeight.w500,
-              color: isFull ? Colors.green.shade700 : Colors.black54,
+              color: isFull 
+                  ? (isDark ? Colors.green.shade400 : Colors.green.shade700) 
+                  : Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
             ),
             textAlign: TextAlign.right,
           ),
@@ -295,18 +350,35 @@ class _AssetOverviewSection extends StatelessWidget {
     );
   }
 
-  Widget _buildStatusGlance() {
+  Widget _buildStatusGlance(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     return Container(
       decoration: BoxDecoration(
-        border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
+        border: Border.all(color: Theme.of(context).dividerColor, width: 1),
       ),
       child: Column(
         children: [
-          _buildStatusRow(Icons.check_circle, Colors.green.shade700, 'Active / Healthy', 1430),
-          const Divider(height: 1, thickness: 1, color: Color(0xFFE5E7EB)),
-          _buildStatusRow(Icons.build, Colors.orange.shade700, 'Under Maintenance', 15),
-          const Divider(height: 1, thickness: 1, color: Color(0xFFE5E7EB)),
-          _buildStatusRow(Icons.warning, Colors.red.shade700, 'Reported Missing', 5),
+          _buildStatusRow(
+            Icons.check_circle, 
+            isDark ? Colors.green.shade400 : Colors.green.shade700, 
+            'Active / Healthy', 
+            1430,
+          ),
+          Divider(height: 1, thickness: 1, color: Theme.of(context).dividerColor),
+          _buildStatusRow(
+            Icons.build, 
+            isDark ? Colors.orange.shade400 : Colors.orange.shade700, 
+            'Under Maintenance', 
+            15,
+          ),
+          Divider(height: 1, thickness: 1, color: Theme.of(context).dividerColor),
+          _buildStatusRow(
+            Icons.warning, 
+            isDark ? Colors.red.shade400 : Colors.red.shade700, 
+            'Reported Missing', 
+            5,
+          ),
         ],
       ),
     );
@@ -336,10 +408,10 @@ class _DashboardCard extends StatelessWidget {
     return Card(
       elevation: 0,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       child: Container(
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.black, width: 1),
+          border: Border.all(color: Theme.of(context).dividerColor, width: 1),
         ),
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -347,15 +419,15 @@ class _DashboardCard extends StatelessWidget {
           children: [
             Text(
               title.toUpperCase(),
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 1.5,
-                color: Colors.black54,
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
               ),
             ),
             const Spacer(),
-            Container(width: 32, height: 2, color: Colors.black),
+            Container(width: 32, height: 2, color: Theme.of(context).colorScheme.onSurface),
           ],
         ),
       ),

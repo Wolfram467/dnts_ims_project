@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../models/hardware_component.dart';
 
 /// ============================================================================
 /// WORKSTATION REPOSITORY
@@ -14,7 +15,7 @@ class WorkstationRepository {
   /// ============================================================================
 
   /// Get all components for a specific workstation
-  static Future<List<Map<String, dynamic>>?> getWorkstationComponents(
+  Future<List<HardwareComponent>?> getWorkstationComponents(
     String workstationIdentifier,
   ) async {
     final sharedPreferences = await SharedPreferences.getInstance();
@@ -28,7 +29,7 @@ class WorkstationRepository {
       final decodedWorkstationData = jsonDecode(serializedWorkstationData);
       if (decodedWorkstationData is List) {
         return decodedWorkstationData
-            .map((item) => Map<String, dynamic>.from(item as Map))
+            .map((item) => HardwareComponent.fromJson(Map<String, dynamic>.from(item as Map)))
             .toList();
       }
     } catch (exception) {
@@ -39,7 +40,7 @@ class WorkstationRepository {
   }
 
   /// Get a specific component from a workstation by category
-  static Future<Map<String, dynamic>?> getComponentByCategory(
+  Future<HardwareComponent?> getComponentByCategory(
     String workstationIdentifier,
     String componentCategory,
   ) async {
@@ -48,7 +49,7 @@ class WorkstationRepository {
 
     try {
       return workstationComponents.firstWhere(
-        (component) => component['category']?.toString().toLowerCase() == componentCategory.toLowerCase(),
+        (component) => component.category.toLowerCase() == componentCategory.toLowerCase(),
       );
     } catch (exception) {
       return null;
@@ -56,7 +57,7 @@ class WorkstationRepository {
   }
 
   /// Check if a workstation has data
-  static Future<bool> hasWorkstationData(String workstationIdentifier) async {
+  Future<bool> hasWorkstationData(String workstationIdentifier) async {
     final workstationComponents = await getWorkstationComponents(workstationIdentifier);
     return workstationComponents != null && workstationComponents.isNotEmpty;
   }
@@ -66,13 +67,15 @@ class WorkstationRepository {
   /// ============================================================================
 
   /// Save complete workstation data
-  static Future<bool> saveWorkstationComponents(
+  Future<bool> saveWorkstationComponents(
     String workstationIdentifier,
-    List<Map<String, dynamic>> workstationComponents,
+    List<HardwareComponent> workstationComponents,
   ) async {
     try {
       final sharedPreferences = await SharedPreferences.getInstance();
-      final serializedWorkstationData = jsonEncode(workstationComponents);
+      final serializedWorkstationData = jsonEncode(
+        workstationComponents.map((component) => component.toJson()).toList(),
+      );
       await sharedPreferences.setString('workstation_$workstationIdentifier', serializedWorkstationData);
       print('✓ Saved workstation: $workstationIdentifier (${workstationComponents.length} components)');
       return true;
@@ -83,10 +86,10 @@ class WorkstationRepository {
   }
 
   /// Update a specific component in a workstation
-  static Future<bool> updateWorkstationComponent(
+  Future<bool> updateWorkstationComponent(
     String workstationIdentifier,
     String componentCategory,
-    Map<String, dynamic> updatedComponent,
+    HardwareComponent updatedComponent,
   ) async {
     try {
       final workstationComponents = await getWorkstationComponents(workstationIdentifier);
@@ -96,11 +99,12 @@ class WorkstationRepository {
       }
 
       // Find and update the component
+      final mutableWorkstationComponents = List<HardwareComponent>.from(workstationComponents);
       bool isComponentFound = false;
-      for (int index = 0; index < workstationComponents.length; index++) {
-        if (workstationComponents[index]['category']?.toString().toLowerCase() ==
+      for (int index = 0; index < mutableWorkstationComponents.length; index++) {
+        if (mutableWorkstationComponents[index].category.toLowerCase() ==
             componentCategory.toLowerCase()) {
-          workstationComponents[index] = updatedComponent;
+          mutableWorkstationComponents[index] = updatedComponent;
           isComponentFound = true;
           break;
         }
@@ -112,7 +116,7 @@ class WorkstationRepository {
       }
 
       // Save updated components
-      return await saveWorkstationComponents(workstationIdentifier, workstationComponents);
+      return await saveWorkstationComponents(workstationIdentifier, mutableWorkstationComponents);
     } catch (exception) {
       print('❌ Error updating component: $exception');
       return false;
@@ -124,7 +128,7 @@ class WorkstationRepository {
   /// ============================================================================
 
   /// Delete a workstation's data
-  static Future<bool> deleteWorkstation(String workstationIdentifier) async {
+  Future<bool> deleteWorkstation(String workstationIdentifier) async {
     try {
       final sharedPreferences = await SharedPreferences.getInstance();
       await sharedPreferences.remove('workstation_$workstationIdentifier');
@@ -137,7 +141,7 @@ class WorkstationRepository {
   }
 
   /// Clear all workstation data
-  static Future<int> clearAllWorkstations() async {
+  Future<int> clearAllWorkstations() async {
     print('🧹 Clearing all workstation data...');
     final sharedPreferences = await SharedPreferences.getInstance();
 
@@ -160,14 +164,14 @@ class WorkstationRepository {
   /// ============================================================================
 
   /// Validate DNTS serial format
-  static bool isValidDntsSerialNumber(String serialNumber) {
+  bool isValidDntsSerialNumber(String serialNumber) {
     // Format: CT1_LAB[1-7]_[MR|M|K|SU|SSD|AVR][01-99]
     final serialNumberRegex = RegExp(r'^CT1_LAB[1-7]_(MR|M|K|SU|SSD|AVR)\d{2}$');
     return serialNumberRegex.hasMatch(serialNumber);
   }
 
   /// Validate component status
-  static bool isValidDeploymentStatus(String deploymentStatus) {
+  bool isValidDeploymentStatus(String deploymentStatus) {
     const validDeploymentStatuses = [
       'Deployed',
       'Under Maintenance',
@@ -179,7 +183,7 @@ class WorkstationRepository {
   }
 
   /// Check if DNTS serial is unique within a lab
-  static Future<bool> isDntsSerialNumberUnique(
+  Future<bool> isDntsSerialNumberUnique(
     String dntsSerialNumber,
     String currentWorkstationIdentifier,
     String componentCategory,
@@ -200,12 +204,12 @@ class WorkstationRepository {
         for (final component in workstationComponents) {
           // Skip the current component being edited
           if (workstationIdentifier == currentWorkstationIdentifier &&
-              component['category'] == componentCategory) {
+              component.category == componentCategory) {
             continue;
           }
 
           // Check for duplicate
-          if (component['dnts_serial'] == dntsSerialNumber) {
+          if (component.dntsSerial == dntsSerialNumber) {
             return false;
           }
         }
@@ -220,7 +224,7 @@ class WorkstationRepository {
   /// ============================================================================
 
   /// Get all workstation IDs in storage
-  static Future<List<String>> getAllWorkstationIdentifiers() async {
+  Future<List<String>> getAllWorkstationIdentifiers() async {
     final sharedPreferences = await SharedPreferences.getInstance();
     final workstationKeys = sharedPreferences.getKeys().where((key) => key.startsWith('workstation_'));
 
@@ -228,13 +232,13 @@ class WorkstationRepository {
   }
 
   /// Get all workstation IDs for a specific lab
-  static Future<List<String>> getLabWorkstationIdentifiers(int labNumber) async {
+  Future<List<String>> getLabWorkstationIdentifiers(int labNumber) async {
     final allWorkstationIdentifiers = await getAllWorkstationIdentifiers();
     return allWorkstationIdentifiers.where((identifier) => identifier.startsWith('L${labNumber}_')).toList();
   }
 
   /// Count total workstations in storage
-  static Future<int> countWorkstations() async {
+  Future<int> countWorkstations() async {
     final workstationIdentifiers = await getAllWorkstationIdentifiers();
     return workstationIdentifiers.length;
   }
@@ -244,7 +248,7 @@ class WorkstationRepository {
   /// ============================================================================
 
   /// List all workstation data (for debugging)
-  static Future<void> debugListAllWorkstations() async {
+  Future<void> debugListAllWorkstations() async {
     print('\n📋 LISTING ALL WORKSTATION DATA');
     print('═══════════════════════════════════════════════════════════════');
 
@@ -263,7 +267,7 @@ class WorkstationRepository {
       if (workstationComponents != null) {
         print('  $identifier → ${workstationComponents.length} components:');
         for (final component in workstationComponents) {
-          print('    - ${component['dnts_serial']} (${component['category']})');
+          print('    - ${component.dntsSerial} (${component.category})');
         }
       }
     }
@@ -272,7 +276,7 @@ class WorkstationRepository {
   }
 
   /// Get storage statistics
-  static Future<Map<String, dynamic>> getStorageStatistics() async {
+  Future<Map<String, dynamic>> getStorageStatistics() async {
     final sharedPreferences = await SharedPreferences.getInstance();
     final allWorkstationIdentifiers = await getAllWorkstationIdentifiers();
 
@@ -294,4 +298,3 @@ class WorkstationRepository {
     return storageStatistics;
   }
 }
-
