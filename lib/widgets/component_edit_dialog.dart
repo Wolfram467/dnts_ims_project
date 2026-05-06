@@ -39,11 +39,10 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
 
   // Valid statuses
   static const List<String> _validDeploymentStatuses = [
-    'Deployed',
-    'Under Maintenance',
-    'Borrowed',
-    'Storage',
-    'Retired',
+    'FUNCTIONAL',
+    'DEFECTIVE',
+    'MISSING',
+    'FOR REPAIR',
   ];
 
   @override
@@ -55,7 +54,18 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
     _manufacturingSerialNumberController = TextEditingController(
       text: widget.component.mfgSerial,
     );
-    _selectedDeploymentStatus = widget.component.status;
+    
+    // Safe Status Mapping logic
+    final rawStatus = widget.component.status.toUpperCase();
+    final bool statusExists = _validDeploymentStatuses.contains(rawStatus);
+    
+    if (statusExists) {
+      _selectedDeploymentStatus = rawStatus;
+    } else if (rawStatus == 'DEPLOYED') {
+      _selectedDeploymentStatus = 'FUNCTIONAL';
+    } else {
+      _selectedDeploymentStatus = 'FUNCTIONAL';
+    }
   }
 
   @override
@@ -70,7 +80,8 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
     final repository = ref.read(workstationRepositoryProvider);
 
     // Check format
-    if (!repository.isValidDntsSerialNumber(serialNumber)) {
+    final bool isFormatValid = repository.isValidDntsSerialNumber(serialNumber);
+    if (isFormatValid == false) {
       setState(() {
         _dntsSerialNumberErrorText = 'Invalid format. Expected: CT1_LAB#_[MR|M|K|SU|SSD|AVR]##';
       });
@@ -84,7 +95,7 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
       widget.component.category,
     );
 
-    if (!isSerialNumberUnique) {
+    if (isSerialNumberUnique == false) {
       setState(() {
         _dntsSerialNumberErrorText = 'This DNTS serial already exists in this lab';
       });
@@ -99,7 +110,13 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
 
   /// Save changes
   Future<void> _saveChanges() async {
-    if (!_formKey.currentState!.validate()) {
+    final formState = _formKey.currentState;
+    if (formState == null) {
+      return;
+    }
+    
+    final bool isFormValid = formState.validate();
+    if (isFormValid == false) {
       return;
     }
 
@@ -107,7 +124,7 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
 
     // Validate DNTS serial
     final isSerialNumberValid = await _validateDntsSerialNumber(dntsSerialNumber);
-    if (!isSerialNumberValid) {
+    if (isSerialNumberValid == false) {
       return;
     }
 
@@ -134,7 +151,8 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
     });
 
     if (wasUpdateSuccessful) {
-      if (mounted) {
+      final bool isComponentMounted = mounted;
+      if (isComponentMounted) {
         // Show success message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -151,7 +169,8 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
         Navigator.of(context).pop();
       }
     } else {
-      if (mounted) {
+      final bool isComponentMounted = mounted;
+      if (isComponentMounted) {
         // Show error message
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

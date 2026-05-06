@@ -1,15 +1,41 @@
 import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:isar/isar.dart';
+import 'package:path_provider/path_provider.dart';
 import '../models/hardware_component.dart';
+import '../models/workstation_model.dart';
 
 /// ============================================================================
 /// WORKSTATION REPOSITORY
 /// ============================================================================
 /// Centralized storage layer for workstation and component data.
-/// Handles CRUD operations for SharedPreferences.
+/// Handles CRUD operations for Isar database.
 /// ============================================================================
 
 class WorkstationRepository {
+  Isar? _isarDatabaseInstance;
+
+  /// Initialize Isar database
+  Future<void> initializeIsar() async {
+    final bool isAlreadyInitialized = _isarDatabaseInstance == null;
+    if (isAlreadyInitialized == false) return;
+
+    final documentDirectory = await getApplicationDocumentsDirectory();
+    _isarDatabaseInstance = await Isar.open(
+      [WorkstationSchema],
+      directory: documentDirectory.path,
+    );
+  }
+
+  /// Helper to get Isar instance safely
+  Future<Isar> _getIsar() async {
+    await initializeIsar();
+    final database = _isarDatabaseInstance;
+    if (database == null) {
+      throw Exception('Isar database failed to initialize');
+    }
+    return database;
+  }
+
   /// ============================================================================
   /// READ OPERATIONS
   /// ============================================================================
@@ -18,22 +44,24 @@ class WorkstationRepository {
   Future<List<HardwareComponent>?> getWorkstationComponents(
     String workstationIdentifier,
   ) async {
-    final sharedPreferences = await SharedPreferences.getInstance();
-    final serializedWorkstationData = sharedPreferences.getString('workstation_$workstationIdentifier');
+    final isar = await _getIsar();
+    final workstation = await isar.workstations.filter()
+        .identifierEqualTo(workstationIdentifier)
+        .findFirst();
 
-    if (serializedWorkstationData == null) {
+    if (workstation == null) {
       return null;
     }
 
     try {
-      final decodedWorkstationData = jsonDecode(serializedWorkstationData);
+      final decodedWorkstationData = jsonDecode(workstation.componentsJson);
       if (decodedWorkstationData is List) {
         return decodedWorkstationData
             .map((item) => HardwareComponent.fromJson(Map<String, dynamic>.from(item as Map)))
             .toList();
       }
     } catch (exception) {
-      print('❌ Error decoding workstation data: $exception');
+      print('Error decoding workstation data: $exception');
     }
 
     return null;
@@ -59,7 +87,9 @@ class WorkstationRepository {
   /// Check if a workstation has data
   Future<bool> hasWorkstationData(String workstationIdentifier) async {
     final workstationComponents = await getWorkstationComponents(workstationIdentifier);
-    return workstationComponents != null && workstationComponents.isNotEmpty;
+    final bool isPresent = workstationComponents == null;
+    final bool isNotEmpty = isPresent == false && workstationComponents.isNotEmpty;
+    return isNotEmpty;
   }
 
   /// ============================================================================
@@ -72,15 +102,27 @@ class WorkstationRepository {
     List<HardwareComponent> workstationComponents,
   ) async {
     try {
-      final sharedPreferences = await SharedPreferences.getInstance();
+      final isar = await _getIsar();
       final serializedWorkstationData = jsonEncode(
         workstationComponents.map((component) => component.toJson()).toList(),
       );
-      await sharedPreferences.setString('workstation_$workstationIdentifier', serializedWorkstationData);
-      print('✓ Saved workstation: $workstationIdentifier (${workstationComponents.length} components)');
+
+      await isar.writeTxn(() async {
+        final existingWorkstation = await isar.workstations.filter()
+            .identifierEqualTo(workstationIdentifier)
+            .findFirst();
+
+        final workstation = existingWorkstation ?? Workstation();
+        workstation.identifier = workstationIdentifier;
+        workstation.componentsJson = serializedWorkstationData;
+
+        await isar.workstations.put(workstation);
+      });
+
+      print('Saved workstation: $workstationIdentifier (${workstationComponents.length} components)');
       return true;
     } catch (exception) {
-      print('❌ Error saving workstation data: $exception');
+      print('Error saving workstation data: $exception');
       return false;
     }
   }
@@ -94,7 +136,7 @@ class WorkstationRepository {
     try {
       final workstationComponents = await getWorkstationComponents(workstationIdentifier);
       if (workstationComponents == null) {
-        print('❌ Workstation not found: $workstationIdentifier');
+        print('Workstation not found: $workstationIdentifier');
         return false;
       }
 
@@ -102,23 +144,24 @@ class WorkstationRepository {
       final mutableWorkstationComponents = List<HardwareComponent>.from(workstationComponents);
       bool isComponentFound = false;
       for (int index = 0; index < mutableWorkstationComponents.length; index++) {
-        if (mutableWorkstationComponents[index].category.toLowerCase() ==
-            componentCategory.toLowerCase()) {
+        final bool isCategoryMatch = mutableWorkstationComponents[index].category.toLowerCase() ==
+            componentCategory.toLowerCase();
+        if (isCategoryMatch) {
           mutableWorkstationComponents[index] = updatedComponent;
           isComponentFound = true;
           break;
         }
       }
 
-      if (!isComponentFound) {
-        print('❌ Component not found: $componentCategory in $workstationIdentifier');
+      if (isComponentFound == false) {
+        print('Component not found: $componentCategory in $workstationIdentifier');
         return false;
       }
 
       // Save updated components
       return await saveWorkstationComponents(workstationIdentifier, mutableWorkstationComponents);
     } catch (exception) {
-      print('❌ Error updating component: $exception');
+      print('Error updating component: $exception');
       return false;
     }
   }
@@ -130,32 +173,31 @@ class WorkstationRepository {
   /// Delete a workstation's data
   Future<bool> deleteWorkstation(String workstationIdentifier) async {
     try {
-      final sharedPreferences = await SharedPreferences.getInstance();
-      await sharedPreferences.remove('workstation_$workstationIdentifier');
-      print('✓ Deleted workstation: $workstationIdentifier');
+      final isar = await _getIsar();
+      await isar.writeTxn(() async {
+        await isar.workstations.filter()
+            .identifierEqualTo(workstationIdentifier)
+            .deleteFirst();
+      });
+      print('Deleted workstation: $workstationIdentifier');
       return true;
     } catch (exception) {
-      print('❌ Error deleting workstation: $exception');
+      print('Error deleting workstation: $exception');
       return false;
     }
   }
 
   /// Clear all workstation data
   Future<int> clearAllWorkstations() async {
-    print('🧹 Clearing all workstation data...');
-    final sharedPreferences = await SharedPreferences.getInstance();
-
-    final preferenceKeys = sharedPreferences.getKeys();
+    print('Clearing all workstation data...');
+    final isar = await _getIsar();
+    
     int removedWorkstationCount = 0;
+    await isar.writeTxn(() async {
+      removedWorkstationCount = await isar.workstations.where().deleteAll();
+    });
 
-    for (final preferenceKey in preferenceKeys) {
-      if (preferenceKey.startsWith('workstation_')) {
-        await sharedPreferences.remove(preferenceKey);
-        removedWorkstationCount++;
-      }
-    }
-
-    print('✅ Cleared $removedWorkstationCount workstations from storage');
+    print('Cleared $removedWorkstationCount workstations from storage');
     return removedWorkstationCount;
   }
 
@@ -173,11 +215,10 @@ class WorkstationRepository {
   /// Validate component status
   bool isValidDeploymentStatus(String deploymentStatus) {
     const validDeploymentStatuses = [
-      'Deployed',
-      'Under Maintenance',
-      'Borrowed',
-      'Storage',
-      'Retired',
+      'FUNCTIONAL',
+      'DEFECTIVE',
+      'MISSING',
+      'FOR REPAIR',
     ];
     return validDeploymentStatuses.contains(deploymentStatus);
   }
@@ -193,18 +234,24 @@ class WorkstationRepository {
     if (facilityLabMatch == null) return true;
 
     final labNumberString = facilityLabMatch.group(1);
-    final sharedPreferences = await SharedPreferences.getInstance();
-    final labWorkstationKeys = sharedPreferences.getKeys().where((key) => key.startsWith('workstation_L${labNumberString}_'));
+    final isar = await _getIsar();
+    
+    final labWorkstations = await isar.workstations.filter()
+        .identifierStartsWith('L${labNumberString}_')
+        .findAll();
 
-    for (final workstationKey in labWorkstationKeys) {
-      final workstationIdentifier = workstationKey.replaceFirst('workstation_', '');
+    for (final workstation in labWorkstations) {
+      final workstationIdentifier = workstation.identifier;
       final workstationComponents = await getWorkstationComponents(workstationIdentifier);
 
-      if (workstationComponents != null) {
-        for (final component in workstationComponents) {
+      if (workstationComponents == null) {
+        continue;
+      }
+      for (final component in workstationComponents) {
           // Skip the current component being edited
-          if (workstationIdentifier == currentWorkstationIdentifier &&
-              component.category == componentCategory) {
+          final bool isCurrentComponent = workstationIdentifier == currentWorkstationIdentifier &&
+              component.category == componentCategory;
+          if (isCurrentComponent) {
             continue;
           }
 
@@ -225,10 +272,11 @@ class WorkstationRepository {
 
   /// Get all workstation IDs in storage
   Future<List<String>> getAllWorkstationIdentifiers() async {
-    final sharedPreferences = await SharedPreferences.getInstance();
-    final workstationKeys = sharedPreferences.getKeys().where((key) => key.startsWith('workstation_'));
-
-    return workstationKeys.map((key) => key.replaceFirst('workstation_', '')).toList()..sort();
+    final isar = await _getIsar();
+    final workstations = await isar.workstations.where().findAll();
+    final identifiers = workstations.map((workstation) => workstation.identifier).toList();
+    identifiers.sort();
+    return identifiers;
   }
 
   /// Get all workstation IDs for a specific lab
@@ -239,62 +287,16 @@ class WorkstationRepository {
 
   /// Count total workstations in storage
   Future<int> countWorkstations() async {
-    final workstationIdentifiers = await getAllWorkstationIdentifiers();
-    return workstationIdentifiers.length;
+    final isar = await _getIsar();
+    return await isar.workstations.count();
   }
 
   /// ============================================================================
-  /// DEBUG UTILITIES
+  /// ACCESSOR
   /// ============================================================================
-
-  /// List all workstation data (for debugging)
-  Future<void> debugListAllWorkstations() async {
-    print('\n📋 LISTING ALL WORKSTATION DATA');
-    print('═══════════════════════════════════════════════════════════════');
-
-    final workstationIdentifiers = await getAllWorkstationIdentifiers();
-
-    if (workstationIdentifiers.isEmpty) {
-      print('❌ No workstation data found in storage');
-      print('═══════════════════════════════════════════════════════════════\n');
-      return;
-    }
-
-    print('Found ${workstationIdentifiers.length} workstations:\n');
-
-    for (final identifier in workstationIdentifiers) {
-      final workstationComponents = await getWorkstationComponents(identifier);
-      if (workstationComponents != null) {
-        print('  $identifier → ${workstationComponents.length} components:');
-        for (final component in workstationComponents) {
-          print('    - ${component.dntsSerial} (${component.category})');
-        }
-      }
-    }
-
-    print('═══════════════════════════════════════════════════════════════\n');
-  }
-
-  /// Get storage statistics
-  Future<Map<String, dynamic>> getStorageStatistics() async {
-    final sharedPreferences = await SharedPreferences.getInstance();
-    final allWorkstationIdentifiers = await getAllWorkstationIdentifiers();
-
-    final storageStatistics = <String, dynamic>{
-      'total_workstations': allWorkstationIdentifiers.length,
-      'labs': <int, int>{},
-    };
-
-    for (int labNumber = 1; labNumber <= 7; labNumber++) {
-      final labWorkstationIdentifiers = allWorkstationIdentifiers.where((identifier) => identifier.startsWith('L${labNumber}_')).toList();
-      if (labWorkstationIdentifiers.isNotEmpty) {
-        storageStatistics['labs'][labNumber] = labWorkstationIdentifiers.length;
-      }
-    }
-
-    storageStatistics['auto_seeded'] = sharedPreferences.getBool('labs_auto_seeded') ?? false;
-    storageStatistics['seed_timestamp'] = sharedPreferences.getString('auto_seed_timestamp');
-
-    return storageStatistics;
+  
+  /// Provides direct access to Isar for cross-workstation transactions
+  Future<Isar> getDatabaseInstance() async {
+    return await _getIsar();
   }
 }

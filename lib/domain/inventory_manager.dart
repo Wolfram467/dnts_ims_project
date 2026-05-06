@@ -1,22 +1,28 @@
+import 'dart:convert';
+import 'package:isar/isar.dart';
 import '../core/result.dart';
 import '../models/hardware_component.dart';
+import '../models/workstation_model.dart';
 import '../utils/workstation_repository.dart';
+import '../services/cloud_sync_service.dart';
 
 /// Domain manager for orchestrating complex inventory operations.
 /// Ensures transactional integrity and business rule enforcement.
 class InventoryManager {
   final WorkstationRepository _repository;
+  final CloudSyncService _syncService;
 
-  InventoryManager(this._repository);
+  InventoryManager(this._repository, this._syncService);
 
   /// Moves a hardware component from one workstation to another atomically.
   /// 
   /// Logic:
-  /// 1. Fetches both workstations.
-  /// 2. Verifies the component exists in the source workstation.
-  /// 3. Verifies the target workstation has capacity (no existing component of the same category).
-  /// 4. Updates both workstation component lists in memory.
-  /// 5. Saves both updates to the repository.
+  /// 1. Initializes the Isar database instance.
+  /// 2. Executes a write transaction for atomicity.
+  /// 3. Fetches and updates both source and target workstation data.
+  /// 4. Enforces the Swiss Rule (one component category per desk).
+  /// 5. Commits changes or rolls back on exception.
+  /// 6. Synchronizes the change to the cloud if the transaction succeeds.
   /// 
   /// Returns [Success] if the move completed, or [Failure] with an explanation.
   Future<Result<void, Exception>> moveComponent({
@@ -25,61 +31,79 @@ class InventoryManager {
     required String toWorkstationId,
   }) async {
     try {
-      // 1. Fetch both workstation datasets
-      final sourceComponents = await _repository.getWorkstationComponents(fromWorkstationId);
-      final targetComponents = await _repository.getWorkstationComponents(toWorkstationId) ?? [];
+      final isar = await _repository.getDatabaseInstance();
 
-      if (sourceComponents == null) {
-        return Failure(Exception('Source workstation "$fromWorkstationId" not found.'));
-      }
+      await isar.writeTxn(() async {
+        // 1. Fetch both workstation entities from Isar
+        final workstations = isar.workstations;
+        final sourceWorkstation = await workstations.filter()
+            .identifierEqualTo(fromWorkstationId)
+            .findFirst();
+        final targetWorkstation = await workstations.filter()
+            .identifierEqualTo(toWorkstationId)
+            .findFirst();
 
-      // 2. Verify component exists in source and remove it
-      HardwareComponent? componentToMove;
-      final updatedSourceList = <HardwareComponent>[];
-
-      for (final component in sourceComponents) {
-        if (component.dntsSerial == componentId) {
-          componentToMove = component;
-        } else {
-          updatedSourceList.add(component);
+        if (sourceWorkstation == null) {
+          throw Exception('Source workstation "$fromWorkstationId" not found in database');
         }
-      }
 
-      if (componentToMove == null) {
-        return Failure(Exception('Component "$componentId" not found in workstation "$fromWorkstationId".'));
-      }
+        // 2. Decode source components and find the target component
+        final List<dynamic> sourceJson = jsonDecode(sourceWorkstation.componentsJson);
+        final sourceComponents = sourceJson.map((item) => HardwareComponent.fromJson(Map<String, dynamic>.from(item as Map))).toList();
 
-      // 3. Verify destination capacity (Swiss Rule: One component per category per desk)
-      final categoryToMatch = componentToMove.category.toLowerCase();
-      final bool alreadyHasCategory = targetComponents.any(
-        (component) => component.category.toLowerCase() == categoryToMatch,
-      );
+        HardwareComponent? componentToMove;
+        final updatedSourceList = <HardwareComponent>[];
 
-      if (alreadyHasCategory) {
-        return Failure(Exception('Target workstation "$toWorkstationId" already has a ${componentToMove.category}.'));
-      }
+        for (final component in sourceComponents) {
+          if (component.dntsSerial == componentId) {
+            componentToMove = component;
+          } else {
+            updatedSourceList.add(component);
+          }
+        }
 
-      // 4. Update target list
-      final updatedTargetList = [...targetComponents, componentToMove];
+        if (componentToMove == null) {
+          throw Exception('Component "$componentId" not found in workstation "$fromWorkstationId"');
+        }
 
-      // 5. Atomic-style save (Sequential saves since SharedPreferences is not transactional)
-      // Note: We save source first. If it fails, target isn't touched.
-      // If target fails, we have a partial state which is a limitation of SharedPreferences.
-      final sourceSaveResult = await _repository.saveWorkstationComponents(fromWorkstationId, updatedSourceList);
-      if (!sourceSaveResult) {
-        return Failure(Exception('Failed to update source workstation storage.'));
-      }
+        // 3. Decode target components and verify capacity (Swiss Rule)
+        final targetComponentsList = <HardwareComponent>[];
+        final bool isTargetPresent = targetWorkstation == null;
+        if (isTargetPresent == false) {
+          final List<dynamic> targetJson = jsonDecode(targetWorkstation.componentsJson);
+          targetComponentsList.addAll(targetJson.map((item) => HardwareComponent.fromJson(Map<String, dynamic>.from(item as Map))));
+        }
 
-      final targetSaveResult = await _repository.saveWorkstationComponents(toWorkstationId, updatedTargetList);
-      if (!targetSaveResult) {
-        // Rollback source if target fails (Attempting best-effort atomicity)
-        await _repository.saveWorkstationComponents(fromWorkstationId, sourceComponents);
-        return Failure(Exception('Failed to update target workstation storage. Rollback performed.'));
-      }
+        final categoryToMatch = componentToMove.category.toLowerCase();
+        final bool alreadyHasCategory = targetComponentsList.any(
+          (component) => component.category.toLowerCase() == categoryToMatch,
+        );
+
+        if (alreadyHasCategory) {
+          throw Exception('Target workstation "$toWorkstationId" already has a ${componentToMove.category}');
+        }
+
+        // 4. Update both workstation states
+        final updatedTargetList = [...targetComponentsList, componentToMove];
+
+        sourceWorkstation.componentsJson = jsonEncode(updatedSourceList.map((c) => c.toJson()).toList());
+        
+        final targetEntity = targetWorkstation ?? Workstation();
+        targetEntity.identifier = toWorkstationId;
+        targetEntity.componentsJson = jsonEncode(updatedTargetList.map((c) => c.toJson()).toList());
+
+        // 5. Persist both changes within the same transaction
+        await workstations.put(sourceWorkstation);
+        await workstations.put(targetEntity);
+      });
+
+      // 6. Cloud Sync (Background)
+      // Only reached if the transaction above succeeds.
+      _syncService.syncComponentMove(componentId, toWorkstationId);
 
       return const Success(null);
     } catch (error) {
-      return Failure(Exception('Unexpected error during component move: $error'));
+      return Failure(Exception('Unexpected error during atomic component move: $error'));
     }
   }
 }

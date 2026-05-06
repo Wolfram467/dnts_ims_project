@@ -4,6 +4,14 @@ import 'package:dnts_ims/core/result.dart';
 import 'package:dnts_ims/domain/inventory_manager.dart';
 import 'package:dnts_ims/models/hardware_component.dart';
 import 'package:dnts_ims/utils/workstation_repository.dart';
+import 'package:dnts_ims/services/cloud_sync_service.dart';
+
+class MockCloudSyncService implements CloudSyncService {
+  @override
+  Future<void> syncComponentMove(String dntsSerial, String newDeskId) async {
+    // No-op for testing
+  }
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -11,11 +19,13 @@ void main() {
   group('InventoryManager Tests', () {
     late WorkstationRepository repository;
     late InventoryManager manager;
+    late MockCloudSyncService syncService;
 
     setUp(() {
       SharedPreferences.setMockInitialValues({});
       repository = WorkstationRepository();
-      manager = InventoryManager(repository);
+      syncService = MockCloudSyncService();
+      manager = InventoryManager(repository, syncService);
     });
 
     test('moveComponent should successfully move a component', () async {
