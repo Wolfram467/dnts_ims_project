@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/map_state_provider.dart';
-import '../utils/workstation_storage.dart';
+import '../utils/workstation_repository.dart';
 import 'component_edit_dialog.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -34,23 +34,23 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
   Widget build(BuildContext context) {
     // Watch Riverpod state for reactive updates
     final isInspectorOpen = ref.watch(inspectorStateProvider);
-    final activeDeskId = ref.watch(activeDeskProvider);
-    final activeDeskComponents = ref.watch(activeDeskComponentsProvider);
+    final activeWorkstationIdentifier = ref.watch(activeDeskProvider);
+    final activeWorkstationComponents = ref.watch(activeDeskComponentsProvider);
 
     // Don't render if inspector is closed
-    if (!isInspectorOpen || activeDeskId == null) {
+    if (!isInspectorOpen || activeWorkstationIdentifier == null) {
       return const SizedBox.shrink();
     }
 
-    final screenWidth = MediaQuery.of(context).size.width;
-    final panelWidth = screenWidth * inspectorPanelWidthFraction;
+    final screenWidthPixels = MediaQuery.of(context).size.width;
+    final panelWidthPixels = screenWidthPixels * inspectorPanelWidthFraction;
 
     return Positioned(
       top: 0,
       right: 0,
       bottom: 0,
       child: Container(
-        width: panelWidth,
+        width: panelWidthPixels,
         decoration: const BoxDecoration(
           color: Color(0xFFF5F5F5), // Light gray background
           border: Border(
@@ -61,13 +61,13 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Header
-            _buildHeader(context, activeDeskId),
+            _buildPanelHeader(context, activeWorkstationIdentifier),
 
             // Visual Desk Layout
             Expanded(
-              child: activeDeskComponents.isEmpty
-                  ? _buildEmptyState()
-                  : _buildVisualDeskLayout(context, activeDeskId, activeDeskComponents),
+              child: activeWorkstationComponents.isEmpty
+                  ? _buildEmptyStateView()
+                  : _buildVisualWorkstationLayout(context, activeWorkstationIdentifier, activeWorkstationComponents),
             ),
           ],
         ),
@@ -79,7 +79,7 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
   // HEADER
   // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildHeader(BuildContext context, String deskId) {
+  Widget _buildPanelHeader(BuildContext context, String workstationIdentifier) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: const BoxDecoration(
@@ -89,7 +89,7 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
         ),
       ),
       child: Text(
-        deskId,
+        workstationIdentifier,
         style: const TextStyle(
           fontSize: 18,
           fontWeight: FontWeight.w300,
@@ -104,7 +104,7 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
   // EMPTY STATE
   // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyStateView() {
     return const Center(
       child: Text(
         'Empty Workstation',
@@ -121,271 +121,251 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
   // VISUAL DESK LAYOUT
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /// Build visual desk layout with component blocks
-  Widget _buildVisualDeskLayout(
+  /// Build visual workstation layout with fixed component slots
+  Widget _buildVisualWorkstationLayout(
     BuildContext context,
-    String workstationId,
-    List<Map<String, dynamic>> components,
+    String workstationIdentifier,
+    List<Map<String, dynamic>> workstationComponents,
   ) {
-    // Helper to find component by category
-    Map<String, dynamic>? findComponent(String category) {
-      try {
-        return components.firstWhere(
-          (c) =>
-              c['category']?.toString().toLowerCase() ==
-              category.toLowerCase(),
-        );
-      } catch (e) {
-        return null;
-      }
-    }
-
-    final keyboard = findComponent('Keyboard');
-    final mouse = findComponent('Mouse');
-    final monitor = findComponent('Monitor');
-    final systemUnit = findComponent('System Unit');
-    final ssd = findComponent('SSD');
-    final avr = findComponent('AVR');
-
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch, // Force full width
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Row 1: Keyboard and Mouse (small - 12% of height)
+          // Row 1: Keyboard and Mouse
           Expanded(
-            flex: 12,
+            flex: 2,
             child: Row(
               children: [
-                // Keyboard (70% width)
                 Expanded(
                   flex: 7,
-                  child: _buildComponentBlock(
-                    context,
-                    workstationId,
-                    'KEYBOARD',
-                    'K',
-                    keyboard,
-                  ),
+                  child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Keyboard'),
                 ),
                 const SizedBox(width: 12),
-                // Mouse (30% width)
                 Expanded(
                   flex: 3,
-                  child: _buildComponentBlock(
-                    context,
-                    workstationId,
-                    'MOUSE',
-                    'M',
-                    mouse,
-                  ),
+                  child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Mouse'),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 12),
 
-          // Row 2: Monitor (large - 32% of height)
+          // Row 2: Monitor (Double Height)
           Expanded(
-            flex: 32,
-            child: _buildComponentBlock(
-              context,
-              workstationId,
-              'MONITOR',
-              'MR',
-              monitor,
-            ),
+            flex: 4,
+            child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Monitor'),
           ),
           const SizedBox(height: 12),
 
-          // Row 3: System Unit with SSD (large - 32% of height)
+          // Row 3: System Unit with nested SSD (Double Height)
           Expanded(
-            flex: 32,
-            child: Row(
-              children: [
-                // System Unit (80% width)
-                Expanded(
-                  flex: 8,
-                  child: _buildComponentBlock(
-                    context,
-                    workstationId,
-                    'SYSTEM UNIT',
-                    'SU',
-                    systemUnit,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                // SSD (20% width)
-                Expanded(
-                  flex: 2,
-                  child: _buildComponentBlock(
-                    context,
-                    workstationId,
-                    'SSD',
-                    'S',
-                    ssd,
-                  ),
-                ),
-              ],
-            ),
+            flex: 4,
+            child: _buildSystemUnitWithNestedSsdSlot(context, workstationIdentifier, workstationComponents),
           ),
           const SizedBox(height: 12),
 
-          // Row 4: AVR (small - 12% of height, same as keyboard)
+          // Row 4: AVR
           Expanded(
-            flex: 12,
-            child: _buildComponentBlock(
-              context,
-              workstationId,
-              'AVR',
-              'AVR',
-              avr,
-            ),
+            flex: 2,
+            child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'AVR'),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 24),
 
-          // Close Button (fixed height, not expanded)
-          _buildCloseButton(),
-          const SizedBox(height: 8),
+          // Close Button
+          _buildPanelCloseButton(),
         ],
       ),
     );
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // COMPONENT BLOCK
+  // COMPONENT SLOTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /// Build a single component block with edit button
-  Widget _buildComponentBlock(
+  /// Build the internal content of a component slot (shared between standard and nested layouts)
+  Widget _buildComponentSlotContent(
     BuildContext context,
-    String workstationId,
-    String label,
-    String abbreviation,
-    Map<String, dynamic>? component,
-  ) {
-    final hasComponent = component != null;
+    String workstationIdentifier,
+    List<Map<String, dynamic>> workstationComponents,
+    String targetCategory, {
+    bool isNestedComponent = false,
+  }) {
+    Map<String, dynamic>? foundComponent;
+    try {
+      foundComponent = workstationComponents.firstWhere(
+        (component) => component['category']?.toString().toLowerCase() == targetCategory.toLowerCase(),
+      );
+    } catch (_) {
+      foundComponent = null;
+    }
 
-    return Container(
-      decoration: BoxDecoration(
-        color: hasComponent
-            ? const Color(0xFF374151) // Dark gray when component exists
-            : const Color(0xFFE5E7EB), // Light gray when empty
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: hasComponent
-              ? const Color(0xFF1F2937) // Darker border when filled
-              : const Color(0xFFD1D5DB), // Light border when empty
-          width: 1,
-        ),
-      ),
-      child: Stack(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
+    final bool isComponentFound = foundComponent != null;
+    final double horizontalPadding = isNestedComponent ? 10.0 : 16.0;
+    final double verticalPadding = isNestedComponent ? 10.0 : 16.0;
+
+    return InkWell(
+      onTap: isComponentFound
+          ? () => _openComponentEditDialog(context, workstationIdentifier, foundComponent!)
+          : null,
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: verticalPadding),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                // Component Label and Status Badge in a Row
-                Row(
-                  children: [
-                    // Component Label (H5)
-                    Text(
-                      label,
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w600,
-                        color: hasComponent
-                            ? Colors.white
-                            : const Color(0xFF9CA3AF),
-                        letterSpacing: 0.15,
-                        height: 1.2,
-                      ),
-                    ),
-                    if (hasComponent) ...[
-                      const SizedBox(width: 12),
-                      // Status Badge
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: _getStatusColor(component['status']),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          component['status'] ?? 'Deployed',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF111827),
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                if (hasComponent) ...[
-                  // DNTS Serial (Body text - no spacing)
-                  Text(
-                    'DNTS: ${component['dnts_serial'] ?? 'N/A'}',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w400,
-                      color: Color(0xFFD1D5DB),
-                      letterSpacing: 0.25,
-                      height: 1.5,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                Text(
+                  targetCategory.toUpperCase(),
+                  style: TextStyle(
+                    fontSize: isNestedComponent ? 13 : 15,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                    letterSpacing: 1.0,
                   ),
-                ],
+                ),
+                const SizedBox(width: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: isComponentFound ? const Color(0xFFA7F3D0) : const Color(0xFF4B5563),
+                    borderRadius: BorderRadius.zero,
+                  ),
+                  child: Text(
+                    isComponentFound ? (foundComponent['status'] ?? 'Deployed').toUpperCase() : 'NOT FOUND',
+                    style: const TextStyle(
+                      fontSize: 8,
+                      fontWeight: FontWeight.w900,
+                      color: Color(0xFF111827),
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
               ],
             ),
-          ),
-          // Edit button (top-right corner)
-          if (hasComponent)
-            Positioned(
-              top: 8,
-              right: 8,
-              child: IconButton(
-                icon: const Icon(Icons.edit, size: 20),
-                color: const Color(0xFF9CA3AF),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(
-                  minWidth: 36,
-                  minHeight: 36,
+            const SizedBox(height: 6),
+            // Serial Number with scale-down logic for long strings
+            SizedBox(
+              width: double.infinity,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  isComponentFound ? 'DNTS: ${foundComponent['dnts_serial'] ?? 'N/A'}' : 'Empty Slot',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w400,
+                    color: isComponentFound ? const Color(0xFFD1D5DB) : const Color(0xFF9CA3AF),
+                    letterSpacing: 0.25,
+                  ),
                 ),
-                onPressed: () => _openEditDialog(context, workstationId, component),
-                tooltip: 'Edit $label',
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Build a fixed component slot with data handling and empty states
+  Widget _buildComponentSlot(
+    BuildContext context,
+    String workstationIdentifier,
+    List<Map<String, dynamic>> workstationComponents,
+    String targetCategory,
+  ) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF374151), // Deep Anthracite
+        border: Border.all(color: Colors.black, width: 1),
+        borderRadius: BorderRadius.zero, // Swiss Style
+      ),
+      child: _buildComponentSlotContent(context, workstationIdentifier, workstationComponents, targetCategory),
+    );
+  }
+
+  /// Specialized slot for System Unit with nested SSD card
+  Widget _buildSystemUnitWithNestedSsdSlot(
+    BuildContext context,
+    String workstationIdentifier,
+    List<Map<String, dynamic>> workstationComponents,
+  ) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF374151), // Deep Anthracite
+        border: Border.all(color: Colors.black, width: 1),
+        borderRadius: BorderRadius.zero, // Swiss Style
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Left side: System Unit details (60% width)
+          Expanded(
+            flex: 6,
+            child: _buildComponentSlotContent(
+              context, 
+              workstationIdentifier, 
+              workstationComponents, 
+              'System Unit',
+            ),
+          ),
+          // Right side: SSD area (40% width)
+          Expanded(
+            flex: 4,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Column(
+                children: [
+                  const Spacer(flex: 1),
+                  Expanded(
+                    flex: 2,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF374151),
+                        border: Border.all(color: Colors.black, width: 1),
+                        borderRadius: BorderRadius.zero,
+                      ),
+                      child: _buildComponentSlotContent(
+                        context, 
+                        workstationIdentifier, 
+                        workstationComponents, 
+                        'SSD',
+                        isNestedComponent: true,
+                      ),
+                    ),
+                  ),
+                  const Spacer(flex: 1),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
   /// Open edit dialog for a component
-  void _openEditDialog(
+  void _openComponentEditDialog(
     BuildContext context,
-    String workstationId,
+    String workstationIdentifier,
     Map<String, dynamic> component,
   ) {
     showDialog(
       context: context,
       builder: (context) => ComponentEditDialog(
-        workstationId: workstationId,
+        workstationIdentifier: workstationIdentifier,
         component: component,
-        onSaved: () => _refreshWorkstationData(workstationId),
+        onSaved: () => _refreshWorkstationData(workstationIdentifier),
       ),
     );
   }
 
   /// Refresh workstation data after edit
-  Future<void> _refreshWorkstationData(String workstationId) async {
-    final components = await WorkstationStorage.getWorkstationComponents(workstationId);
-    if (components != null && mounted) {
-      ref.read(activeDeskComponentsProvider.notifier).setComponents(components);
+  Future<void> _refreshWorkstationData(String workstationIdentifier) async {
+    final workstationComponents = await WorkstationRepository.getWorkstationComponents(workstationIdentifier);
+    if (workstationComponents != null && mounted) {
+      ref.read(activeDeskComponentsProvider.notifier).setComponents(workstationComponents);
     }
   }
 
@@ -393,7 +373,7 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
   // CLOSE BUTTON
   // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildCloseButton() {
+  Widget _buildPanelCloseButton() {
     return SizedBox(
       height: 56,
       child: ElevatedButton(
@@ -401,8 +381,8 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFF374151),
           foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(28), // Fully rounded
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.zero, // Swiss Style
           ),
           elevation: 0,
         ),
@@ -438,8 +418,8 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /// Get status badge color
-  Color _getStatusColor(String? status) {
-    switch (status?.toLowerCase()) {
+  Color _resolveStatusColor(String? deploymentStatus) {
+    switch (deploymentStatus?.toLowerCase()) {
       case 'deployed':
         return const Color(0xFFA7F3D0); // Green
       case 'under maintenance':
@@ -458,3 +438,4 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
     }
   }
 }
+

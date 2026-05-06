@@ -10,9 +10,9 @@ import 'package:flutter/material.dart';
 
 /// Pure utility class for drag boundary detection and escape gesture logic.
 /// Contains no state, no UI rendering, only mathematical calculations.
-class DragBoundaryUtils {
+class DragBoundaryCalculator {
   // Private constructor to prevent instantiation
-  DragBoundaryUtils._();
+  DragBoundaryCalculator._();
 
   // ═══════════════════════════════════════════════════════════════════════════
   // CONSTANTS
@@ -23,11 +23,11 @@ class DragBoundaryUtils {
 
   /// Escape gesture trigger threshold (pixels from screen edge)
   /// When dragging within this distance from any edge, escape gesture triggers
-  static const double escapeGestureEdgeThreshold = 50.0;
+  static const double escapeGestureEdgeThresholdPixels = 50.0;
 
   /// Modal safe zone boundary (pixels from panel edge)
   /// When dragging beyond this distance from the panel, the modal closes
-  static const double modalSafeZoneThreshold = 100.0;
+  static const double modalSafeZoneThresholdPixels = 100.0;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // PUBLIC API
@@ -36,7 +36,7 @@ class DragBoundaryUtils {
   /// Determines if the drag position should trigger an escape gesture.
   ///
   /// The escape gesture is triggered when the user drags a component close to
-  /// any screen edge (within [escapeGestureEdgeThreshold] pixels).
+  /// any screen edge (within [escapeGestureEdgeThresholdPixels] pixels).
   ///
   /// This is part of the "Omni-Directional Break-Away" pattern, allowing users
   /// to quickly exit the inspector panel by dragging toward any edge.
@@ -55,22 +55,22 @@ class DragBoundaryUtils {
     Size screenSize,
   ) {
     // Check if dragging near left edge
-    if (dragPosition.dx < escapeGestureEdgeThreshold) {
+    if (dragPosition.dx < escapeGestureEdgeThresholdPixels) {
       return true;
     }
 
     // Check if dragging near right edge
-    if (dragPosition.dx > screenSize.width - escapeGestureEdgeThreshold) {
+    if (dragPosition.dx > screenSize.width - escapeGestureEdgeThresholdPixels) {
       return true;
     }
 
     // Check if dragging near top edge
-    if (dragPosition.dy < escapeGestureEdgeThreshold) {
+    if (dragPosition.dy < escapeGestureEdgeThresholdPixels) {
       return true;
     }
 
     // Check if dragging near bottom edge
-    if (dragPosition.dy > screenSize.height - escapeGestureEdgeThreshold) {
+    if (dragPosition.dy > screenSize.height - escapeGestureEdgeThresholdPixels) {
       return true;
     }
 
@@ -82,7 +82,7 @@ class DragBoundaryUtils {
   ///
   /// The modal safe zone is the area around the inspector panel where dragging
   /// is considered "safe" and keeps the panel open. When the user drags beyond
-  /// this zone (more than [modalSafeZoneThreshold] pixels to the left of the
+  /// this zone (more than [modalSafeZoneThresholdPixels] pixels to the left of the
   /// panel), the modal should close.
   ///
   /// This implements the "Break-Away" behavior where dragging far enough from
@@ -102,13 +102,13 @@ class DragBoundaryUtils {
     Size screenSize,
   ) {
     // Calculate the left edge of the inspector panel
-    final panelLeftEdge = screenSize.width * (1.0 - inspectorPanelWidthFraction);
+    final panelLeftEdgeX = screenSize.width * (1.0 - inspectorPanelWidthFraction);
 
     // Calculate the safe zone boundary (to the left of the panel)
-    final safeZoneBoundary = panelLeftEdge - modalSafeZoneThreshold;
+    final safeZoneBoundaryX = panelLeftEdgeX - modalSafeZoneThresholdPixels;
 
     // Check if drag position is to the left of the safe zone boundary
-    return dragPosition.dx < safeZoneBoundary;
+    return dragPosition.dx < safeZoneBoundaryX;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -124,7 +124,7 @@ class DragBoundaryUtils {
   /// - X coordinate of the panel's left edge in screen coordinates
   ///
   /// **Pure function:** No side effects, deterministic output.
-  static double calculatePanelLeftEdge(Size screenSize) {
+  static double calculatePanelLeftEdgeX(Size screenSize) {
     return screenSize.width * (1.0 - inspectorPanelWidthFraction);
   }
 
@@ -137,7 +137,7 @@ class DragBoundaryUtils {
   /// - Width of the panel in pixels
   ///
   /// **Pure function:** No side effects, deterministic output.
-  static double calculatePanelWidth(Size screenSize) {
+  static double calculatePanelWidthPixels(Size screenSize) {
     return screenSize.width * inspectorPanelWidthFraction;
   }
 
@@ -156,8 +156,8 @@ class DragBoundaryUtils {
     Offset dragPosition,
     Size screenSize,
   ) {
-    final panelLeftEdge = calculatePanelLeftEdge(screenSize);
-    return dragPosition.dx >= panelLeftEdge;
+    final panelLeftEdgeX = calculatePanelLeftEdgeX(screenSize);
+    return dragPosition.dx >= panelLeftEdgeX;
   }
 
   /// Determines if a drag position is in the main canvas area (left of panel).
@@ -191,21 +191,21 @@ class DragBoundaryUtils {
   /// - Distance in pixels to the nearest edge
   ///
   /// **Pure function:** No side effects, deterministic output.
-  static double distanceToNearestEdge(
+  static double distanceToNearestEdgePixels(
     Offset dragPosition,
     Size screenSize,
   ) {
-    final distanceToLeft = dragPosition.dx;
-    final distanceToRight = screenSize.width - dragPosition.dx;
-    final distanceToTop = dragPosition.dy;
-    final distanceToBottom = screenSize.height - dragPosition.dy;
+    final distanceToLeftEdgePixels = dragPosition.dx;
+    final distanceToRightEdgePixels = screenSize.width - dragPosition.dx;
+    final distanceToTopEdgePixels = dragPosition.dy;
+    final distanceToBottomEdgePixels = screenSize.height - dragPosition.dy;
 
     // Return the minimum distance
     return [
-      distanceToLeft,
-      distanceToRight,
-      distanceToTop,
-      distanceToBottom,
+      distanceToLeftEdgePixels,
+      distanceToRightEdgePixels,
+      distanceToTopEdgePixels,
+      distanceToBottomEdgePixels,
     ].reduce((a, b) => a < b ? a : b);
   }
 
@@ -223,21 +223,21 @@ class DragBoundaryUtils {
     Offset dragPosition,
     Size screenSize,
   ) {
-    final distanceToLeft = dragPosition.dx;
-    final distanceToRight = screenSize.width - dragPosition.dx;
-    final distanceToTop = dragPosition.dy;
-    final distanceToBottom = screenSize.height - dragPosition.dy;
+    final distanceToLeftEdgePixels = dragPosition.dx;
+    final distanceToRightEdgePixels = screenSize.width - dragPosition.dx;
+    final distanceToTopEdgePixels = dragPosition.dy;
+    final distanceToBottomEdgePixels = screenSize.height - dragPosition.dy;
 
-    final minDistance = [
-      distanceToLeft,
-      distanceToRight,
-      distanceToTop,
-      distanceToBottom,
+    final minDistancePixels = [
+      distanceToLeftEdgePixels,
+      distanceToRightEdgePixels,
+      distanceToTopEdgePixels,
+      distanceToBottomEdgePixels,
     ].reduce((a, b) => a < b ? a : b);
 
-    if (minDistance == distanceToLeft) return 'left';
-    if (minDistance == distanceToRight) return 'right';
-    if (minDistance == distanceToTop) return 'top';
+    if (minDistancePixels == distanceToLeftEdgePixels) return 'left';
+    if (minDistancePixels == distanceToRightEdgePixels) return 'right';
+    if (minDistancePixels == distanceToTopEdgePixels) return 'top';
     return 'bottom';
   }
 }

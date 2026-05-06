@@ -71,11 +71,11 @@ class DeskWidget extends ConsumerWidget {
               width: cellSize,
               height: cellSize,
               decoration: BoxDecoration(
-                color: const Color(0xFFFFFFFF), // Solid white
+                color: Theme.of(context).colorScheme.surface, // Background based on theme
                 border: Border.all(
                   color: isHovering
-                      ? const Color(0xFF000000) // Black border on hover
-                      : const Color(0xFFD1D5DB), // Gray border default
+                      ? Theme.of(context).colorScheme.onSurface // High contrast on hover
+                      : Theme.of(context).dividerColor, // Muted border default
                   width: isHovering ? 2 : 1,
                 ),
               ),
@@ -83,10 +83,10 @@ class DeskWidget extends ConsumerWidget {
                 child: Text(
                   deskId,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 9,
-                    fontWeight: FontWeight.w400,
-                    color: Color(0xFF374151), // Dark gray text
+                    fontWeight: FontWeight.w700,
+                    color: Theme.of(context).colorScheme.onSurface, // Text color based on theme
                     letterSpacing: 0.5,
                   ),
                 ),

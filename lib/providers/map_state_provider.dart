@@ -295,6 +295,9 @@ final isInspectorActiveProvider = Provider<bool>((ref) {
   return isOpen && hasDesk;
 });
 
+/// Provider for triggering a data refresh across the application
+final refreshTriggerProvider = StateProvider<int>((ref) => 0);
+
 // ═══════════════════════════════════════════════════════════════════════════
 // CAMERA CONTROL PROVIDER
 // Used for triggering camera actions from the shell (zoom, fit all labs, etc.)

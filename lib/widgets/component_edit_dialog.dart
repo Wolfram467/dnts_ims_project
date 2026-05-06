@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../utils/workstation_storage.dart';
+import '../utils/workstation_repository.dart';
 
 /// ============================================================================
 /// COMPONENT EDIT DIALOG
@@ -11,13 +11,13 @@ import '../utils/workstation_storage.dart';
 /// ============================================================================
 
 class ComponentEditDialog extends StatefulWidget {
-  final String workstationId;
+  final String workstationIdentifier;
   final Map<String, dynamic> component;
   final VoidCallback onSaved;
 
   const ComponentEditDialog({
     super.key,
-    required this.workstationId,
+    required this.workstationIdentifier,
     required this.component,
     required this.onSaved,
   });
@@ -27,16 +27,16 @@ class ComponentEditDialog extends StatefulWidget {
 }
 
 class _ComponentEditDialogState extends State<ComponentEditDialog> {
-  late TextEditingController _dntsController;
-  late TextEditingController _mfgController;
-  late String _selectedStatus;
+  late TextEditingController _dntsSerialNumberController;
+  late TextEditingController _manufacturingSerialNumberController;
+  late String _selectedDeploymentStatus;
 
   final _formKey = GlobalKey<FormState>();
-  bool _isSaving = false;
-  String? _dntsError;
+  bool _isSavingInProgress = false;
+  String? _dntsSerialNumberErrorText;
 
   // Valid statuses
-  static const List<String> validStatuses = [
+  static const List<String> _validDeploymentStatuses = [
     'Deployed',
     'Under Maintenance',
     'Borrowed',
@@ -47,48 +47,48 @@ class _ComponentEditDialogState extends State<ComponentEditDialog> {
   @override
   void initState() {
     super.initState();
-    _dntsController = TextEditingController(
+    _dntsSerialNumberController = TextEditingController(
       text: widget.component['dnts_serial'] ?? '',
     );
-    _mfgController = TextEditingController(
+    _manufacturingSerialNumberController = TextEditingController(
       text: widget.component['mfg_serial'] ?? '',
     );
-    _selectedStatus = widget.component['status'] ?? 'Deployed';
+    _selectedDeploymentStatus = widget.component['status'] ?? 'Deployed';
   }
 
   @override
   void dispose() {
-    _dntsController.dispose();
-    _mfgController.dispose();
+    _dntsSerialNumberController.dispose();
+    _manufacturingSerialNumberController.dispose();
     super.dispose();
   }
 
   /// Validate DNTS serial format and uniqueness
-  Future<bool> _validateDntsSerial(String value) async {
+  Future<bool> _validateDntsSerialNumber(String serialNumber) async {
     // Check format
-    if (!WorkstationStorage.isValidDntsSerial(value)) {
+    if (!WorkstationRepository.isValidDntsSerialNumber(serialNumber)) {
       setState(() {
-        _dntsError = 'Invalid format. Expected: CT1_LAB#_[MR|M|K|SU|SSD|AVR]##';
+        _dntsSerialNumberErrorText = 'Invalid format. Expected: CT1_LAB#_[MR|M|K|SU|SSD|AVR]##';
       });
       return false;
     }
 
     // Check uniqueness within the lab
-    final isUnique = await WorkstationStorage.isDntsSerialUnique(
-      value,
-      widget.workstationId,
+    final isSerialNumberUnique = await WorkstationRepository.isDntsSerialNumberUnique(
+      serialNumber,
+      widget.workstationIdentifier,
       widget.component['category'],
     );
 
-    if (!isUnique) {
+    if (!isSerialNumberUnique) {
       setState(() {
-        _dntsError = 'This DNTS serial already exists in this lab';
+        _dntsSerialNumberErrorText = 'This DNTS serial already exists in this lab';
       });
       return false;
     }
 
     setState(() {
-      _dntsError = null;
+      _dntsSerialNumberErrorText = null;
     });
     return true;
   }
@@ -99,36 +99,36 @@ class _ComponentEditDialogState extends State<ComponentEditDialog> {
       return;
     }
 
-    final dntsSerial = _dntsController.text.trim();
+    final dntsSerialNumber = _dntsSerialNumberController.text.trim();
 
     // Validate DNTS serial
-    final isValid = await _validateDntsSerial(dntsSerial);
-    if (!isValid) {
+    final isSerialNumberValid = await _validateDntsSerialNumber(dntsSerialNumber);
+    if (!isSerialNumberValid) {
       return;
     }
 
     setState(() {
-      _isSaving = true;
+      _isSavingInProgress = true;
     });
 
     // Create updated component
     final updatedComponent = Map<String, dynamic>.from(widget.component);
-    updatedComponent['dnts_serial'] = dntsSerial;
-    updatedComponent['mfg_serial'] = _mfgController.text.trim();
-    updatedComponent['status'] = _selectedStatus;
+    updatedComponent['dnts_serial'] = dntsSerialNumber;
+    updatedComponent['mfg_serial'] = _manufacturingSerialNumberController.text.trim();
+    updatedComponent['status'] = _selectedDeploymentStatus;
 
     // Save to storage
-    final success = await WorkstationStorage.updateComponent(
-      widget.workstationId,
+    final wasUpdateSuccessful = await WorkstationRepository.updateWorkstationComponent(
+      widget.workstationIdentifier,
       widget.component['category'],
       updatedComponent,
     );
 
     setState(() {
-      _isSaving = false;
+      _isSavingInProgress = false;
     });
 
-    if (success) {
+    if (wasUpdateSuccessful) {
       if (mounted) {
         // Show success message
         ScaffoldMessenger.of(context).showSnackBar(
@@ -195,7 +195,7 @@ class _ComponentEditDialogState extends State<ComponentEditDialog> {
               ),
               const SizedBox(height: 8),
               Text(
-                widget.workstationId,
+                widget.workstationIdentifier,
                 style: const TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w300,
@@ -206,11 +206,11 @@ class _ComponentEditDialogState extends State<ComponentEditDialog> {
 
               // DNTS Serial Number
               TextFormField(
-                controller: _dntsController,
+                controller: _dntsSerialNumberController,
                 decoration: InputDecoration(
                   labelText: 'DNTS Serial Number',
                   hintText: 'CT1_LAB5_MR01',
-                  errorText: _dntsError,
+                  errorText: _dntsSerialNumberErrorText,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -224,9 +224,9 @@ class _ComponentEditDialogState extends State<ComponentEditDialog> {
                 },
                 onChanged: (value) {
                   // Clear error when user types
-                  if (_dntsError != null) {
+                  if (_dntsSerialNumberErrorText != null) {
                     setState(() {
-                      _dntsError = null;
+                      _dntsSerialNumberErrorText = null;
                     });
                   }
                 },
@@ -235,7 +235,7 @@ class _ComponentEditDialogState extends State<ComponentEditDialog> {
 
               // Manufacturer Serial Number
               TextFormField(
-                controller: _mfgController,
+                controller: _manufacturingSerialNumberController,
                 decoration: InputDecoration(
                   labelText: 'Manufacturer Serial Number',
                   hintText: 'Enter manufacturer serial',
@@ -255,7 +255,7 @@ class _ComponentEditDialogState extends State<ComponentEditDialog> {
 
               // Status Dropdown
               DropdownButtonFormField<String>(
-                value: _selectedStatus,
+                value: _selectedDeploymentStatus,
                 decoration: InputDecoration(
                   labelText: 'Status',
                   border: OutlineInputBorder(
@@ -263,7 +263,7 @@ class _ComponentEditDialogState extends State<ComponentEditDialog> {
                   ),
                   prefixIcon: const Icon(Icons.info_outline),
                 ),
-                items: validStatuses.map((status) {
+                items: _validDeploymentStatuses.map((status) {
                   return DropdownMenuItem(
                     value: status,
                     child: Text(status),
@@ -272,7 +272,7 @@ class _ComponentEditDialogState extends State<ComponentEditDialog> {
                 onChanged: (value) {
                   if (value != null) {
                     setState(() {
-                      _selectedStatus = value;
+                      _selectedDeploymentStatus = value;
                     });
                   }
                 },
@@ -284,12 +284,12 @@ class _ComponentEditDialogState extends State<ComponentEditDialog> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(
-                    onPressed: _isSaving ? null : () => Navigator.of(context).pop(),
+                    onPressed: _isSavingInProgress ? null : () => Navigator.of(context).pop(),
                     child: const Text('Cancel'),
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton(
-                    onPressed: _isSaving ? null : _saveChanges,
+                    onPressed: _isSavingInProgress ? null : _saveChanges,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF374151),
                       foregroundColor: Colors.white,
@@ -301,7 +301,7 @@ class _ComponentEditDialogState extends State<ComponentEditDialog> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    child: _isSaving
+                    child: _isSavingInProgress
                         ? const SizedBox(
                             width: 16,
                             height: 16,

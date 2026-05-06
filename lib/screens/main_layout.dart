@@ -1,17 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../providers/map_state_provider.dart';
+import '../providers/theme_provider.dart';
 import 'auth_screen.dart';
 import 'dashboard_screen.dart';
 import 'interactive_map_screen.dart';
 
-class MainLayout extends StatefulWidget {
+class MainLayout extends ConsumerStatefulWidget {
   const MainLayout({super.key});
 
   @override
-  State<MainLayout> createState() => _MainLayoutState();
+  ConsumerState<MainLayout> createState() => _MainLayoutState();
 }
 
-class _MainLayoutState extends State<MainLayout> {
+class _MainLayoutState extends ConsumerState<MainLayout> {
   int selectedIndex = 0;
   String? _userRole;
   bool _isLoading = true;
@@ -89,10 +92,10 @@ class _MainLayoutState extends State<MainLayout> {
             onDestinationSelected: (index) =>
                 setState(() => selectedIndex = index),
             labelType: NavigationRailLabelType.all,
-            backgroundColor: Colors.white,
-            selectedIconTheme: const IconThemeData(color: Colors.black),
-            selectedLabelTextStyle: const TextStyle(
-              color: Colors.black,
+            backgroundColor: Theme.of(context).colorScheme.surface,
+            selectedIconTheme: IconThemeData(color: Theme.of(context).colorScheme.onSurface),
+            selectedLabelTextStyle: TextStyle(
+              color: Theme.of(context).colorScheme.onSurface,
               fontWeight: FontWeight.w600,
               fontSize: 11,
               letterSpacing: 0.5,
@@ -104,19 +107,29 @@ class _MainLayoutState extends State<MainLayout> {
             ),
             leading: Padding(
               padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Column(
-                children: [
-                  const Text(
-                    'DNTS',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      letterSpacing: 2,
+              child: InkWell(
+                onTap: () {
+                  // Increment global refresh trigger
+                  ref.read(refreshTriggerProvider.notifier).state++;
+                  // Reset map camera to global overview
+                  ref.read(cameraControlProvider.notifier).fitAllLabs();
+                },
+                mouseCursor: SystemMouseCursors.click,
+                child: Column(
+                  children: [
+                    Text(
+                      'DNTS',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                        letterSpacing: 2,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Container(width: 24, height: 1, color: Colors.black),
-                ],
+                    const SizedBox(height: 4),
+                    Container(width: 24, height: 1, color: Theme.of(context).colorScheme.onSurface),
+                  ],
+                ),
               ),
             ),
             trailing: Expanded(
@@ -124,10 +137,24 @@ class _MainLayoutState extends State<MainLayout> {
                 alignment: Alignment.bottomCenter,
                 child: Padding(
                   padding: const EdgeInsets.only(bottom: 16),
-                  child: IconButton(
-                    icon: Icon(Icons.logout, color: Colors.grey.shade500),
-                    tooltip: 'Logout',
-                    onPressed: _handleLogout,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: Icon(
+                          ref.watch(themeProvider) ? Icons.light_mode : Icons.dark_mode,
+                          color: Colors.grey.shade500,
+                        ),
+                        tooltip: 'Toggle Theme',
+                        onPressed: () => ref.read(themeProvider.notifier).toggleTheme(),
+                      ),
+                      const SizedBox(height: 16),
+                      IconButton(
+                        icon: Icon(Icons.logout, color: Colors.grey.shade500),
+                        tooltip: 'Logout',
+                        onPressed: _handleLogout,
+                      ),
+                    ],
                   ),
                 ),
               ),

@@ -2,9 +2,10 @@ import 'dart:math';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/map_state_provider.dart';
-import '../utils/workstation_storage.dart';
+import '../utils/workstation_repository.dart';
 import '../utils/keyboard_shortcuts.dart';
 import '../services/camera_state_service.dart';
 import 'desk_widget.dart';
@@ -44,20 +45,20 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   Animation<Matrix4>? _snapAnimation;
 
   /// Minimum allowed scale (calculated to fit all labs)
-  double? _minAllowedScale;
+  double? _minimumAllowedScale;
 
   /// Desk coordinate map (Master Blueprint: 332 desks across 7 labs)
-  final Map<String, Offset> deskLayouts = _generateDeskCoordinates();
+  final Map<String, Offset> _deskLayouts = _generateDeskCoordinates();
 
   /// Cached list of desk widgets (generated once, reused on every build)
   /// PERFORMANCE: Prevents re-mapping deskLayouts.entries on every rebuild
   List<Widget>? _cachedDeskWidgets;
 
   /// Focus node for keyboard shortcuts
-  late final FocusNode _focusNode;
+  late final FocusNode _keyboardFocusNode;
 
   /// Timer for debouncing camera state saves
-  Timer? _saveStateTimer;
+  Timer? _cameraStateSaveDebounceTimer;
 
   /// Flag to prevent loading state during initialization
   bool _isInitializing = true;
@@ -65,25 +66,24 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   /// Scroll zoom animation controller
   AnimationController? _scrollZoomController;
   Animation<Matrix4>? _scrollZoomAnimation;
-  
-  /// Target scale for smooth scroll zoom
-  double? _targetScrollScale;
 
+  /// The target transformation matrix being accumulated during rapid scroll events
+  Matrix4? _accumulatedTargetMatrix;
+  
   // ═══════════════════════════════════════════════════════════════════════════
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  static const double gridCellSize = 100.0;
-  static const double inspectorZoomLevel = 2.5;
-  static const double panStep = 200.0; // Pixels to pan per arrow key press
+  static const double gridCellSizePixels = 100.0;
+  static const double panStepPixels = 200.0; // Pixels to pan per arrow key press
 
   // iOS-style animation constants
-  static const Duration iosQuickDuration = Duration(milliseconds: 300);
-  static const Duration iosStandardDuration = Duration(milliseconds: 350);
-  static const Duration iosSlowDuration = Duration(milliseconds: 450);
-  static const Duration iosScrollZoomDuration = Duration(milliseconds: 150); // Faster for scroll
-  static const Curve iosEaseOut = Curves.easeOut;
-  static const Curve iosEaseInOut = Curves.easeInOut;
+  static const Duration iosQuickAnimationDuration = Duration(milliseconds: 300);
+  static const Duration iosStandardAnimationDuration = Duration(milliseconds: 350);
+  static const Duration iosSlowAnimationDuration = Duration(milliseconds: 450);
+  static const Duration iosScrollZoomAnimationDuration = Duration(milliseconds: 150); // Faster for scroll
+  static const Curve iosEaseOutCurve = Curves.easeOut;
+  static const Curve iosEaseInOutCurve = Curves.easeInOut;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // LIFECYCLE
@@ -93,11 +93,10 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   void initState() {
     super.initState();
     _transformationController = TransformationController();
-    _transformationController.addListener(_enforceMinScale);
-    _transformationController.addListener(_onCameraChanged);
+    _transformationController.addListener(_onCameraTransformationChanged);
 
     // Initialize focus node for keyboard shortcuts
-    _focusNode = FocusNode();
+    _keyboardFocusNode = FocusNode();
 
     // PERFORMANCE: Pre-generate desk widgets once
     // This list is static and doesn't depend on reactive state
@@ -105,14 +104,14 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
 
     // Load saved camera state or fit all labs after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadInitialState();
+      _loadInitialCameraState();
     });
   }
 
   /// Load initial camera state from localStorage or fit all labs
-  Future<void> _loadInitialState() async {
+  Future<void> _loadInitialCameraState() async {
     final savedMatrix = await CameraStateService.loadCameraState();
-    final savedDeskId = await CameraStateService.loadActiveDeskState();
+    final savedWorkstationIdentifier = await CameraStateService.loadActiveDeskState();
 
     if (!mounted) return;
 
@@ -126,22 +125,22 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
       print('📂 Restored camera state');
 
       // If there was an active desk, restore it
-      if (savedDeskId != null && deskLayouts.containsKey(savedDeskId)) {
-        await _loadDeskComponents(savedDeskId);
+      if (savedWorkstationIdentifier != null && _deskLayouts.containsKey(savedWorkstationIdentifier)) {
+        await _loadWorkstationComponents(savedWorkstationIdentifier);
       }
     } else {
       // No saved state, fit all labs
-      _fitAllLabs();
+      _fitAllLabsInView();
     }
   }
 
   /// Called when camera transformation changes (debounced save)
-  void _onCameraChanged() {
+  void _onCameraTransformationChanged() {
     if (_isInitializing) return;
 
     // Debounce: only save after 500ms of no changes
-    _saveStateTimer?.cancel();
-    _saveStateTimer = Timer(const Duration(milliseconds: 500), () {
+    _cameraStateSaveDebounceTimer?.cancel();
+    _cameraStateSaveDebounceTimer = Timer(const Duration(milliseconds: 500), () {
       CameraStateService.saveCameraState(_transformationController.value);
     });
   }
@@ -149,43 +148,42 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   /// Build the list of desk widgets once (called in initState)
   /// PERFORMANCE: Prevents re-mapping 332 desks on every rebuild
   List<Widget> _buildDeskWidgetList() {
-    const double offsetX = 2.0 * gridCellSize; // 200px
-    const double offsetY = 2.0 * gridCellSize; // 200px
+    const double horizontalOffsetPixels = 2.0 * gridCellSizePixels; 
+    const double verticalOffsetPixels = 2.0 * gridCellSizePixels;
 
-    return deskLayouts.entries.map((entry) {
-      final id = entry.key;
-      final cell = entry.value;
+    return _deskLayouts.entries.map((entry) {
+      final workstationIdentifier = entry.key;
+      final gridCoordinates = entry.value;
 
       // Adjust position by subtracting offset (shift from col 2, row 2 to 0, 0)
-      final adjustedX = (cell.dx * gridCellSize) - offsetX;
-      final adjustedY = (cell.dy * gridCellSize) - offsetY;
+      final adjustedHorizontalPositionPixels = (gridCoordinates.dx * gridCellSizePixels) - horizontalOffsetPixels;
+      final adjustedVerticalPositionPixels = (gridCoordinates.dy * gridCellSizePixels) - verticalOffsetPixels;
 
       // Render pillars differently
-      if (id.startsWith('PILLAR_')) {
+      if (workstationIdentifier.startsWith('PILLAR_')) {
         return Positioned(
-          left: adjustedX,
-          top: adjustedY,
-          child: _buildPillar(),
+          left: adjustedHorizontalPositionPixels,
+          top: adjustedVerticalPositionPixels,
+          child: _buildStructuralPillar(),
         );
       }
 
       return Positioned(
-        left: adjustedX,
-        top: adjustedY,
-        child: _buildCanvasDesk(id),
+        left: adjustedHorizontalPositionPixels,
+        top: adjustedVerticalPositionPixels,
+        child: _buildCanvasWorkstation(workstationIdentifier),
       );
     }).toList();
   }
 
   @override
   void dispose() {
-    _transformationController.removeListener(_enforceMinScale);
-    _transformationController.removeListener(_onCameraChanged);
+    _transformationController.removeListener(_onCameraTransformationChanged);
     _transformationController.dispose();
     _snapAnimationController?.dispose();
     _scrollZoomController?.dispose();
-    _focusNode.dispose();
-    _saveStateTimer?.cancel();
+    _keyboardFocusNode.dispose();
+    _cameraStateSaveDebounceTimer?.cancel();
     super.dispose();
   }
 
@@ -193,102 +191,88 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   // ZOOM CONSTRAINT LOGIC
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /// Enforce minimum scale constraint (prevent zooming out too far)
-  void _enforceMinScale() {
-    if (_minAllowedScale == null) return;
-
-    final matrix = _transformationController.value;
-    final currentScale = matrix.getMaxScaleOnAxis();
-
-    if (currentScale < _minAllowedScale!) {
-      // Scale is too small, clamp it to minimum
-      final clampedMatrix = matrix.clone();
-      final scaleFactor = _minAllowedScale! / currentScale;
-      clampedMatrix.scale(scaleFactor);
-      _transformationController.value = clampedMatrix;
+  /// Calculates the dynamic responsive matrix to perfectly frame the canvas.
+  /// Derived from user's manual adjustments: ~40px horizontal and ~150px vertical padding.
+  Matrix4 _calculateGlobalOverviewMatrix() {
+    // Determine exact size of the MapCanvasWidget viewport.
+    // Fallback to MediaQuery if renderBox is not yet laid out (rare edge case).
+    Size viewportSize;
+    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox != null && renderBox.hasSize) {
+      viewportSize = renderBox.size;
+    } else {
+      viewportSize = MediaQuery.of(context).size;
     }
+
+    const double canvasWidthPixels = 3200.0;
+    const double canvasHeightPixels = 1700.0;
+
+    // Calculate scale to fit canvas with dynamic padding
+    final double horizontalScaleFactor = (viewportSize.width - 40) / canvasWidthPixels;
+    final double verticalScaleFactor = (viewportSize.height - 150) / canvasHeightPixels;
+    final double targetScale = min(horizontalScaleFactor, verticalScaleFactor).clamp(0.01, 5.0);
+
+    _minimumAllowedScale = targetScale;
+
+    // Center of the physical blueprint canvas
+    const double contentCenterHorizontalPixels = canvasWidthPixels / 2;
+    const double contentCenterVerticalPixels = canvasHeightPixels / 2;
+
+    final double viewportCenterHorizontalPixels = viewportSize.width / 2;
+    final double viewportCenterVerticalPixels = viewportSize.height / 2;
+
+    final double translationHorizontalPixels = viewportCenterHorizontalPixels - (contentCenterHorizontalPixels * targetScale);
+    final double translationVerticalPixels = viewportCenterVerticalPixels - (contentCenterVerticalPixels * targetScale);
+
+    return Matrix4.identity()
+      ..translate(translationHorizontalPixels, translationVerticalPixels)
+      ..scale(targetScale);
   }
 
   /// Fit all laboratories in view (used for initial load and reset)
-  void _fitAllLabs() {
+  void _fitAllLabsInView() {
     if (!mounted) return;
-
-    // Actual lab bounds: Columns 2-33 (B-AG), Rows 2-18
-    const double minCol = 2.0;
-    const double maxCol = 33.0;
-    const double minRow = 2.0;
-    const double maxRow = 18.0;
-
-    final double contentWidth = (maxCol - minCol + 1) * gridCellSize;
-    final double contentHeight = (maxRow - minRow + 1) * gridCellSize;
-
-    final screenSize = MediaQuery.of(context).size;
-
-    // Calculate scale to fit all content with padding
-    final double scaleX = (screenSize.width * 0.9) / contentWidth;
-    final double scaleY = (screenSize.height * 0.9) / contentHeight;
-    final double scale = min(scaleX, scaleY);
-
-    // Set this as the minimum allowed scale
-    _minAllowedScale = scale;
-
-    // Calculate center of content in world coordinates
-    final double contentCenterX = (minCol + maxCol) / 2 * gridCellSize;
-    final double contentCenterY = (minRow + maxRow) / 2 * gridCellSize;
-
-    // Calculate screen center
-    final double screenCenterX = screenSize.width / 2;
-    final double screenCenterY = screenSize.height / 2;
-
-    // Calculate translation to center content
-    final double translateX = screenCenterX - (contentCenterX * scale);
-    final double translateY = screenCenterY - (contentCenterY * scale);
-
-    final targetMatrix = Matrix4.identity()
-      ..translate(translateX, translateY)
-      ..scale(scale);
-
-    _transformationController.value = targetMatrix;
+    _transformationController.value = _calculateGlobalOverviewMatrix();
   }
 
   /// Zoom in by 20% with iOS-style animation
   void _zoomIn() {
     if (!mounted) return;
     
-    final currentMatrix = _transformationController.value.clone();
-    final targetMatrix = currentMatrix.clone();
-    targetMatrix.scale(1.2);
+    final currentTransformationMatrix = _transformationController.value.clone();
+    final targetTransformationMatrix = currentTransformationMatrix.clone();
+    targetTransformationMatrix.scale(1.2);
     
-    _animateMatrixChange(currentMatrix, targetMatrix, iosQuickDuration);
+    _animateCameraTransformation(currentTransformationMatrix, targetTransformationMatrix, iosQuickAnimationDuration);
   }
 
   /// Zoom out by 20% with iOS-style animation
   void _zoomOut() {
     if (!mounted) return;
     
-    final currentMatrix = _transformationController.value.clone();
-    final targetMatrix = currentMatrix.clone();
-    targetMatrix.scale(0.8);
+    final currentTransformationMatrix = _transformationController.value.clone();
+    final targetTransformationMatrix = currentTransformationMatrix.clone();
+    targetTransformationMatrix.scale(0.8);
     
-    _animateMatrixChange(currentMatrix, targetMatrix, iosQuickDuration);
+    _animateCameraTransformation(currentTransformationMatrix, targetTransformationMatrix, iosQuickAnimationDuration);
   }
 
   /// Animate matrix change with iOS-style curve
-  void _animateMatrixChange(Matrix4 begin, Matrix4 end, Duration duration) {
+  void _animateCameraTransformation(Matrix4 startMatrix, Matrix4 endMatrix, Duration animationDuration) {
     _snapAnimationController?.dispose();
     _snapAnimationController = AnimationController(
       vsync: this,
-      duration: duration,
+      duration: animationDuration,
     );
 
     final curvedAnimation = CurvedAnimation(
       parent: _snapAnimationController!,
-      curve: iosEaseOut,
+      curve: iosEaseOutCurve,
     );
 
     _snapAnimation = Matrix4Tween(
-      begin: begin,
-      end: end,
+      begin: startMatrix,
+      end: endMatrix,
     ).animate(curvedAnimation);
 
     _snapAnimation!.addListener(() {
@@ -305,206 +289,230 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   // ═══════════════════════════════════════════════════════════════════════════
 
   /// Handle keyboard shortcuts
-  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+  KeyEventResult _processKeyboardEvent(FocusNode focusNode, KeyEvent keyboardEvent) {
+    if (keyboardEvent is! KeyDownEvent) return KeyEventResult.ignored;
 
-    final action = KeyboardShortcuts.getAction(event);
-    if (action == null) return KeyEventResult.ignored;
+    final shortcutAction = KeyboardShortcuts.getAction(keyboardEvent);
+    if (shortcutAction == null) return KeyEventResult.ignored;
 
-    _executeShortcutAction(action);
+    _executeKeyboardShortcut(shortcutAction);
     return KeyEventResult.handled;
   }
 
   /// Execute keyboard shortcut action
-  void _executeShortcutAction(MapShortcutAction action) {
-    switch (action) {
+  void _executeKeyboardShortcut(MapShortcutAction shortcutAction) {
+    switch (shortcutAction) {
       case MapShortcutAction.closeInspector:
-        _handleCloseInspector();
+        _processInspectorCloseRequest();
         break;
       case MapShortcutAction.panUp:
-        _panCamera(0, -panStep);
+        _panCameraView(0, -panStepPixels);
         break;
       case MapShortcutAction.panDown:
-        _panCamera(0, panStep);
+        _panCameraView(0, panStepPixels);
         break;
       case MapShortcutAction.panLeft:
-        _panCamera(-panStep, 0);
+        _panCameraView(-panStepPixels, 0);
         break;
       case MapShortcutAction.panRight:
-        _panCamera(panStep, 0);
+        _panCameraView(panStepPixels, 0);
         break;
       case MapShortcutAction.zoomIn:
         _zoomIn();
-        _showShortcutFeedback('Zoom In');
+        _displayShortcutFeedbackMessage('Zoom In');
         break;
       case MapShortcutAction.zoomOut:
         _zoomOut();
-        _showShortcutFeedback('Zoom Out');
+        _displayShortcutFeedbackMessage('Zoom Out');
         break;
       case MapShortcutAction.fitAllLabs:
-        _fitAllLabs();
-        _showShortcutFeedback('Fit All Labs');
+        _fitAllLabsInView();
+        _displayShortcutFeedbackMessage('Fit All Labs');
         break;
       case MapShortcutAction.jumpToLab1:
-        _jumpToLab(1);
+        _transitionToLaboratory(1);
         break;
       case MapShortcutAction.jumpToLab2:
-        _jumpToLab(2);
+        _transitionToLaboratory(2);
         break;
       case MapShortcutAction.jumpToLab3:
-        _jumpToLab(3);
+        _transitionToLaboratory(3);
         break;
       case MapShortcutAction.jumpToLab4:
-        _jumpToLab(4);
+        _transitionToLaboratory(4);
         break;
       case MapShortcutAction.jumpToLab5:
-        _jumpToLab(5);
+        _transitionToLaboratory(5);
         break;
       case MapShortcutAction.jumpToLab6:
-        _jumpToLab(6);
+        _transitionToLaboratory(6);
         break;
       case MapShortcutAction.jumpToLab7:
-        _jumpToLab(7);
+        _transitionToLaboratory(7);
         break;
       case MapShortcutAction.cycleDeskNext:
-        _cycleDeskInCurrentLab(forward: true);
+        _cycleWorkstationInCurrentLaboratory(forward: true);
         break;
       case MapShortcutAction.cycleDeskPrevious:
-        _cycleDeskInCurrentLab(forward: false);
+        _cycleWorkstationInCurrentLaboratory(forward: false);
         break;
       case MapShortcutAction.showHelp:
-        _showKeyboardShortcutsHelp();
+        _displayKeyboardShortcutsDialog();
         break;
     }
   }
 
   /// Handle close inspector shortcut
-  void _handleCloseInspector() {
+  void _processInspectorCloseRequest() {
     final isInspectorOpen = ref.read(inspectorStateProvider);
     if (isInspectorOpen) {
       resetToGlobalOverview();
-      _showShortcutFeedback('Inspector Closed');
+      _displayShortcutFeedbackMessage('Inspector Closed');
     }
   }
 
   /// Pan camera by delta pixels
-  void _panCamera(double dx, double dy) {
+  void _panCameraView(double horizontalDeltaPixels, double verticalDeltaPixels) {
     final isInspectorOpen = ref.read(inspectorStateProvider);
     if (isInspectorOpen) return; // Don't pan when inspector is open
 
     if (!mounted) return;
-    final matrix = _transformationController.value.clone();
-    matrix.translate(dx, dy);
-    _transformationController.value = matrix;
+    final currentTransformationMatrix = _transformationController.value.clone();
+    currentTransformationMatrix.translate(horizontalDeltaPixels, verticalDeltaPixels);
+    _transformationController.value = currentTransformationMatrix;
   }
 
   /// Jump to a specific lab
-  Future<void> _jumpToLab(int labNumber) async {
+  Future<void> _transitionToLaboratory(int labNumber) async {
     // Get first desk in the lab
-    final labDesks = deskLayouts.keys
-        .where((id) => id.startsWith('L${labNumber}_D'))
+    final labWorkstationIdentifiers = _deskLayouts.keys
+        .where((identifier) => identifier.startsWith('L${labNumber}_D'))
         .toList()
       ..sort();
 
-    if (labDesks.isEmpty) {
-      _showShortcutFeedback('Lab $labNumber not found');
+    if (labWorkstationIdentifiers.isEmpty) {
+      _displayShortcutFeedbackMessage('Lab $labNumber not found');
       return;
     }
 
     // Calculate lab bounds
-    final labDeskOffsets = labDesks.map((id) => deskLayouts[id]!).toList();
-    final minCol = labDeskOffsets.map((o) => o.dx).reduce((a, b) => a < b ? a : b);
-    final maxCol = labDeskOffsets.map((o) => o.dx).reduce((a, b) => a > b ? a : b);
-    final minRow = labDeskOffsets.map((o) => o.dy).reduce((a, b) => a < b ? a : b);
-    final maxRow = labDeskOffsets.map((o) => o.dy).reduce((a, b) => a > b ? a : b);
+    final labWorkstationOffsets = labWorkstationIdentifiers.map((identifier) => _deskLayouts[identifier]!).toList();
+    final minimumColumnNumber = labWorkstationOffsets.map((offset) => offset.dx).reduce((a, b) => a < b ? a : b);
+    final maximumColumnNumber = labWorkstationOffsets.map((offset) => offset.dx).reduce((a, b) => a > b ? a : b);
+    final minimumRowNumber = labWorkstationOffsets.map((offset) => offset.dy).reduce((a, b) => a < b ? a : b);
+    final maximumRowNumber = labWorkstationOffsets.map((offset) => offset.dy).reduce((a, b) => a > b ? a : b);
 
-    // Calculate center of lab
-    final centerCol = (minCol + maxCol) / 2;
-    final centerRow = (minRow + maxRow) / 2;
+    // Get exact viewport size for dynamic responsive zooming
+    Size viewportSize;
+    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox != null && renderBox.hasSize) {
+      viewportSize = renderBox.size;
+    } else {
+      viewportSize = MediaQuery.of(context).size;
+    }
 
-    // Animate to lab center
-    await _animateToPosition(centerCol, centerRow, 1.5);
-    _showShortcutFeedback('Lab $labNumber');
+    final double contentWidthPixels = (maximumColumnNumber - minimumColumnNumber + 1) * gridCellSizePixels;
+    final double contentHeightPixels = (maximumRowNumber - minimumRowNumber + 1) * gridCellSizePixels;
+
+    // Apply ~200px dynamic padding to reverse-engineer user's exact manual zoom preference
+    final double horizontalScaleFactor = (viewportSize.width - 200) / contentWidthPixels;
+    final double verticalScaleFactor = (viewportSize.height - 200) / contentHeightPixels;
+    final double dynamicTargetScale = min(horizontalScaleFactor, verticalScaleFactor).clamp(0.01, 5.0);
+
+    // Calculate center of lab (adding 1 to include full cell width/height)
+    final centerColumnNumber = (minimumColumnNumber + maximumColumnNumber + 1) / 2;
+    final centerRowNumber = (minimumRowNumber + maximumRowNumber + 1) / 2;
+
+    // Animate to lab center with dynamic scale
+    await _animateToWorldPosition(centerColumnNumber, centerRowNumber, dynamicTargetScale);
+    _displayShortcutFeedbackMessage('Lab $labNumber');
   }
 
   /// Cycle through desks in current lab
-  void _cycleDeskInCurrentLab({required bool forward}) {
-    final activeDeskId = ref.read(activeDeskProvider);
+  void _cycleWorkstationInCurrentLaboratory({required bool forward}) {
+    final activeWorkstationIdentifier = ref.read(activeDeskProvider);
     
-    if (activeDeskId == null) {
-      _showShortcutFeedback('No active desk');
+    if (activeWorkstationIdentifier == null) {
+      _displayShortcutFeedbackMessage('No active desk');
       return;
     }
 
     // Extract lab number from current desk
-    final labMatch = RegExp(r'L(\d+)_D').firstMatch(activeDeskId);
-    if (labMatch == null) return;
+    final laboratoryMatch = RegExp(r'L(\d+)_D').firstMatch(activeWorkstationIdentifier);
+    if (laboratoryMatch == null) return;
 
-    final labNumber = int.parse(labMatch.group(1)!);
+    final labNumber = int.parse(laboratoryMatch.group(1)!);
 
     // Get all desks in this lab
-    final labDesks = deskLayouts.keys
-        .where((id) => id.startsWith('L${labNumber}_D'))
+    final labWorkstationIdentifiers = _deskLayouts.keys
+        .where((identifier) => identifier.startsWith('L${labNumber}_D'))
         .toList()
       ..sort();
 
-    if (labDesks.isEmpty) return;
+    if (labWorkstationIdentifiers.isEmpty) return;
 
     // Find current desk index
-    final currentIndex = labDesks.indexOf(activeDeskId);
-    if (currentIndex == -1) return;
+    final currentWorkstationIndex = labWorkstationIdentifiers.indexOf(activeWorkstationIdentifier);
+    if (currentWorkstationIndex == -1) return;
 
     // Calculate next index
-    int nextIndex;
+    int nextWorkstationIndex;
     if (forward) {
-      nextIndex = (currentIndex + 1) % labDesks.length;
+      nextWorkstationIndex = (currentWorkstationIndex + 1) % labWorkstationIdentifiers.length;
     } else {
-      nextIndex = (currentIndex - 1 + labDesks.length) % labDesks.length;
+      nextWorkstationIndex = (currentWorkstationIndex - 1 + labWorkstationIdentifiers.length) % labWorkstationIdentifiers.length;
     }
 
-    final nextDeskId = labDesks[nextIndex];
-    _loadDeskComponents(nextDeskId);
-    _showShortcutFeedback(nextDeskId);
+    final nextWorkstationIdentifier = labWorkstationIdentifiers[nextWorkstationIndex];
+    _loadWorkstationComponents(nextWorkstationIdentifier);
+    _displayShortcutFeedbackMessage(nextWorkstationIdentifier);
   }
 
   /// Animate camera to a specific position
-  Future<void> _animateToPosition(double col, double row, double zoom) async {
+  Future<void> _animateToWorldPosition(double columnNumber, double rowNumber, double targetScale) async {
     if (!mounted) return;
 
-    final screenSize = MediaQuery.of(context).size;
-    final targetX = screenSize.width * 0.5;
-    final targetY = screenSize.height * 0.5;
+    Size viewportSize;
+    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox != null && renderBox.hasSize) {
+      viewportSize = renderBox.size;
+    } else {
+      viewportSize = MediaQuery.of(context).size;
+    }
 
-    const double offsetX = 2.0 * gridCellSize;
-    const double offsetY = 2.0 * gridCellSize;
+    final screenTargetHorizontalPixels = viewportSize.width * 0.5;
+    final screenTargetVerticalPixels = viewportSize.height * 0.5;
 
-    final worldX = (col * gridCellSize) - offsetX;
-    final worldY = (row * gridCellSize) - offsetY;
+    const double horizontalOffsetPixels = 2.0 * gridCellSizePixels;
+    const double verticalOffsetPixels = 2.0 * gridCellSizePixels;
 
-    final translationX = targetX - (worldX * zoom);
-    final translationY = targetY - (worldY * zoom);
+    final worldHorizontalPixels = (columnNumber * gridCellSizePixels) - horizontalOffsetPixels;
+    final worldVerticalPixels = (rowNumber * gridCellSizePixels) - verticalOffsetPixels;
 
-    final targetMatrix = Matrix4.identity()
-      ..translate(translationX, translationY)
-      ..scale(zoom);
+    final translationHorizontalPixels = screenTargetHorizontalPixels - (worldHorizontalPixels * targetScale);
+    final translationVerticalPixels = screenTargetVerticalPixels - (worldVerticalPixels * targetScale);
 
-    final currentMatrix = _transformationController.value.clone();
+    final targetTransformationMatrix = Matrix4.identity()
+      ..translate(translationHorizontalPixels, translationVerticalPixels)
+      ..scale(targetScale);
+
+    final currentTransformationMatrix = _transformationController.value.clone();
 
     _snapAnimationController?.dispose();
     _snapAnimationController = AnimationController(
       vsync: this,
-      duration: iosQuickDuration, // iOS-style quick navigation
+      duration: iosQuickAnimationDuration, // iOS-style quick navigation
     );
 
     // iOS uses easeOut for navigation - starts fast, ends smoothly
     final curvedAnimation = CurvedAnimation(
       parent: _snapAnimationController!,
-      curve: iosEaseOut,
+      curve: iosEaseOutCurve,
     );
 
     _snapAnimation = Matrix4Tween(
-      begin: currentMatrix,
-      end: targetMatrix,
+      begin: currentTransformationMatrix,
+      end: targetTransformationMatrix,
     ).animate(curvedAnimation);
 
     _snapAnimation!.addListener(() {
@@ -517,12 +525,12 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   }
 
   /// Show keyboard shortcut feedback
-  void _showShortcutFeedback(String message) {
+  void _displayShortcutFeedbackMessage(String feedbackMessage) {
     if (!mounted) return;
     
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
+        content: Text(feedbackMessage),
         duration: const Duration(milliseconds: 1200), // iOS-style longer feedback
         behavior: SnackBarBehavior.floating,
         width: 200,
@@ -535,7 +543,7 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   }
 
   /// Show keyboard shortcuts help dialog
-  void _showKeyboardShortcutsHelp() {
+  void _displayKeyboardShortcutsDialog() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -548,14 +556,14 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildShortcutRow('ESC', 'Close Inspector / Return to Overview'),
-              _buildShortcutRow('Arrow Keys', 'Pan Camera'),
-              _buildShortcutRow('+/-', 'Zoom In/Out'),
-              _buildShortcutRow('Space', 'Fit All Labs'),
-              _buildShortcutRow('1-7', 'Jump to Lab 1-7'),
-              _buildShortcutRow('Tab', 'Next Desk in Lab'),
-              _buildShortcutRow('Shift+Tab', 'Previous Desk in Lab'),
-              _buildShortcutRow('?', 'Show This Help'),
+              _buildKeyboardShortcutHelpEntry('ESC', 'Close Inspector / Return to Overview'),
+              _buildKeyboardShortcutHelpEntry('Arrow Keys', 'Pan Camera'),
+              _buildKeyboardShortcutHelpEntry('+/-', 'Zoom In/Out'),
+              _buildKeyboardShortcutHelpEntry('Space', 'Fit All Labs'),
+              _buildKeyboardShortcutHelpEntry('1-7', 'Jump to Lab 1-7'),
+              _buildKeyboardShortcutHelpEntry('Tab', 'Next Desk in Lab'),
+              _buildKeyboardShortcutHelpEntry('Shift+Tab', 'Previous Desk in Lab'),
+              _buildKeyboardShortcutHelpEntry('?', 'Show This Help'),
             ],
           ),
         ),
@@ -569,7 +577,7 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     );
   }
 
-  Widget _buildShortcutRow(String key, String description) {
+  Widget _buildKeyboardShortcutHelpEntry(String keyboardKey, String shortcutDescription) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -582,7 +590,7 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
               border: Border.all(color: Colors.black, width: 1),
             ),
             child: Text(
-              key,
+              keyboardKey,
               style: const TextStyle(
                 fontWeight: FontWeight.w600,
                 fontFamily: 'monospace',
@@ -591,7 +599,7 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Text(description),
+            child: Text(shortcutDescription),
           ),
         ],
       ),
@@ -603,33 +611,55 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   // ═══════════════════════════════════════════════════════════════════════════
 
   /// Snap-to-Inspect: Animate camera with iOS-style spring physics
-  Future<void> _snapToDesk(String deskId) async {
-    final deskOffset = deskLayouts[deskId];
-    if (deskOffset == null || !mounted) return;
+  Future<void> _animateToWorkstationFocus(String workstationIdentifier) async {
+    final workstationGridOffset = _deskLayouts[workstationIdentifier];
+    if (workstationGridOffset == null || !mounted) return;
 
-    // Get screen dimensions
-    final screenSize = MediaQuery.of(context).size;
-    final targetX = screenSize.width * 0.3; // 30% from left (center-left)
-    final targetY = screenSize.height * 0.5; // Vertical center
+    // Get exact viewport size for dynamic placement
+    Size viewportSize;
+    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox != null && renderBox.hasSize) {
+      viewportSize = renderBox.size;
+    } else {
+      viewportSize = MediaQuery.of(context).size;
+    }
 
-    // Calculate the desk's world position on canvas
+    // Dynamic placement: reverse-engineered from user's manual framing
+    // The inspector panel takes up 40% of the right screen, so our available map area is the left 60%.
+    final double availableWidthPixels = viewportSize.width * 0.6;
+    final double availableHeightPixels = viewportSize.height;
+
+    // A single desk is exactly 1 cell (100x100 pixels)
+    const double contentWidthPixels = gridCellSizePixels;
+    const double contentHeightPixels = gridCellSizePixels;
+
+    // Apply ~200px dynamic padding to exactly mimic the lab zoom logic
+    final double horizontalScaleFactor = (availableWidthPixels - 200) / contentWidthPixels;
+    final double verticalScaleFactor = (availableHeightPixels - 200) / contentHeightPixels;
+    final double dynamicTargetScale = min(horizontalScaleFactor, verticalScaleFactor).clamp(0.01, 15.0);
+
+    // Target the center of the available 60% space (which is 30% from the left edge)
+    final screenTargetHorizontalPixels = viewportSize.width * 0.3; 
+    final screenTargetVerticalPixels = viewportSize.height * 0.5; // Vertical dead-center
+
+    // Calculate the desk's world position on canvas (centering on the 1x1 cell by adding 0.5)
     // Account for coordinate offset (canvas starts at col 2, row 2)
-    const double offsetX = 2.0 * gridCellSize; // 200px
-    const double offsetY = 2.0 * gridCellSize; // 200px
+    const double horizontalOffsetPixels = 2.0 * gridCellSizePixels; 
+    const double verticalOffsetPixels = 2.0 * gridCellSizePixels; 
 
-    final deskWorldX = (deskOffset.dx * gridCellSize) - offsetX;
-    final deskWorldY = (deskOffset.dy * gridCellSize) - offsetY;
+    final worldHorizontalPixels = ((workstationGridOffset.dx + 0.5) * gridCellSizePixels) - horizontalOffsetPixels;
+    final worldVerticalPixels = ((workstationGridOffset.dy + 0.5) * gridCellSizePixels) - verticalOffsetPixels;
 
-    final translationX = targetX - (deskWorldX * inspectorZoomLevel);
-    final translationY = targetY - (deskWorldY * inspectorZoomLevel);
+    final translationHorizontalPixels = screenTargetHorizontalPixels - (worldHorizontalPixels * dynamicTargetScale);
+    final translationVerticalPixels = screenTargetVerticalPixels - (worldVerticalPixels * dynamicTargetScale);
 
     // Create target transformation matrix
-    final targetMatrix = Matrix4.identity()
-      ..translate(translationX, translationY)
-      ..scale(inspectorZoomLevel);
+    final targetTransformationMatrix = Matrix4.identity()
+      ..translate(translationHorizontalPixels, translationVerticalPixels)
+      ..scale(dynamicTargetScale);
 
     // Get current matrix
-    final currentMatrix = _transformationController.value.clone();
+    final currentTransformationMatrix = _transformationController.value.clone();
 
     // Dispose old controller if exists
     _snapAnimationController?.dispose();
@@ -637,7 +667,7 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     // iOS-style spring animation - responsive and natural
     _snapAnimationController = AnimationController(
       vsync: this,
-      duration: iosStandardDuration, // 350ms - iOS standard duration
+      duration: iosStandardAnimationDuration, // 350ms - iOS standard duration
     );
 
     // iOS uses a custom spring curve for interactive elements
@@ -649,8 +679,8 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
 
     // Create matrix tween
     _snapAnimation = Matrix4Tween(
-      begin: currentMatrix,
-      end: targetMatrix,
+      begin: currentTransformationMatrix,
+      end: targetTransformationMatrix,
     ).animate(curvedAnimation);
 
     // Listen to animation and update transformation controller
@@ -677,56 +707,27 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     // Clear active desk from localStorage
     CameraStateService.clearActiveDeskState();
 
-    // Calculate global overview matrix (fit all labs in view)
-    const double minCol = 2.0;
-    const double maxCol = 33.0;
-    const double minRow = 2.0;
-    const double maxRow = 18.0;
-
-    final double contentWidth = (maxCol - minCol + 1) * gridCellSize;
-    final double contentHeight = (maxRow - minRow + 1) * gridCellSize;
-
-    final screenSize = MediaQuery.of(context).size;
-
-    // Calculate scale to fit all content with padding
-    final double scaleX = (screenSize.width * 0.95) / contentWidth;
-    final double scaleY = (screenSize.height * 0.95) / contentHeight;
-    final double scale = min(scaleX, scaleY);
-
-    // Calculate center of content in world coordinates
-    final double contentCenterX = (minCol + maxCol) / 2 * gridCellSize;
-    final double contentCenterY = (minRow + maxRow) / 2 * gridCellSize;
-
-    // Calculate screen center
-    final double screenCenterX = screenSize.width / 2;
-    final double screenCenterY = screenSize.height / 2;
-
-    // Calculate translation to center content
-    final double translateX = screenCenterX - (contentCenterX * scale);
-    final double translateY = screenCenterY - (contentCenterY * scale);
-
-    final targetMatrix = Matrix4.identity()
-      ..translate(translateX, translateY)
-      ..scale(scale);
+    // Calculate global overview matrix
+    final targetTransformationMatrix = _calculateGlobalOverviewMatrix();
 
     // Animate from current position to global overview
-    final currentMatrix = _transformationController.value.clone();
+    final currentTransformationMatrix = _transformationController.value.clone();
 
     _snapAnimationController?.dispose();
     _snapAnimationController = AnimationController(
       vsync: this,
-      duration: iosSlowDuration, // 450ms - iOS uses slightly longer for "back" actions
+      duration: iosSlowAnimationDuration, // 450ms - iOS uses slightly longer for "back" actions
     );
 
     // iOS uses easeInOut for dismissal/back actions - smooth both ways
     final curvedAnimation = CurvedAnimation(
       parent: _snapAnimationController!,
-      curve: iosEaseInOut,
+      curve: iosEaseInOutCurve,
     );
 
     _snapAnimation = Matrix4Tween(
-      begin: currentMatrix,
-      end: targetMatrix,
+      begin: currentTransformationMatrix,
+      end: targetTransformationMatrix,
     ).animate(curvedAnimation);
 
     _snapAnimation!.addListener(() {
@@ -743,12 +744,12 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   // ═══════════════════════════════════════════════════════════════════════════
 
   /// Load desk components and trigger snap-to-inspect animation
-  Future<void> _loadDeskComponents(String deskId) async {
-    print('🖱️ Desk clicked: $deskId');
+  Future<void> _loadWorkstationComponents(String workstationIdentifier) async {
+    print('🖱️ Desk clicked: $workstationIdentifier');
     print('🔍 Loading components for inspector...');
 
     // Set selected desk for pulse animation (via Riverpod)
-    ref.read(selectedDeskProvider.notifier).selectDesk(deskId);
+    ref.read(selectedDeskProvider.notifier).selectDesk(workstationIdentifier);
 
     // Trigger pulse animation (will reset after 250ms - iOS timing)
     Future.delayed(const Duration(milliseconds: 250), () {
@@ -757,42 +758,42 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
       }
     });
 
-    // Query local storage for this specific workstation
-    final localAssets = await WorkstationStorage.getWorkstationComponents(deskId);
+    // Query local repository for this specific workstation
+    final workstationComponents = await WorkstationRepository.getWorkstationComponents(workstationIdentifier);
 
-    if (localAssets != null && localAssets.isNotEmpty) {
-      print('✅ Found in local storage: ${localAssets.length} components');
+    if (workstationComponents != null && workstationComponents.isNotEmpty) {
+      print('✅ Found in local storage: ${workstationComponents.length} components');
       
       // Update Riverpod state
-      ref.read(activeDeskProvider.notifier).setActiveDesk(deskId);
-      ref.read(activeDeskComponentsProvider.notifier).setComponents(localAssets);
+      ref.read(activeDeskProvider.notifier).setActiveDesk(workstationIdentifier);
+      ref.read(activeDeskComponentsProvider.notifier).setComponents(workstationComponents);
       ref.read(inspectorStateProvider.notifier).openInspector();
 
       // Save active desk to localStorage
-      CameraStateService.saveActiveDeskState(deskId);
+      CameraStateService.saveActiveDeskState(workstationIdentifier);
 
       // Snap-to-Inspect: Animate to desk position with spring physics
-      await _snapToDesk(deskId);
+      await _animateToWorkstationFocus(workstationIdentifier);
     } else {
-      print('❌ No assets found in local storage for: $deskId');
+      print('❌ No assets found in local storage for: $workstationIdentifier');
       
       // Update Riverpod state (empty desk)
-      ref.read(activeDeskProvider.notifier).setActiveDesk(deskId);
+      ref.read(activeDeskProvider.notifier).setActiveDesk(workstationIdentifier);
       ref.read(activeDeskComponentsProvider.notifier).clearComponents();
       ref.read(inspectorStateProvider.notifier).openInspector();
 
       // Save active desk to localStorage
-      CameraStateService.saveActiveDeskState(deskId);
+      CameraStateService.saveActiveDeskState(workstationIdentifier);
 
       // Still snap even if empty
-      await _snapToDesk(deskId);
+      await _animateToWorkstationFocus(workstationIdentifier);
     }
   }
 
   /// Handle component drop on a desk
   Future<void> _handleComponentDrop(
     Map<String, dynamic> draggedComponent,
-    String targetDeskId,
+    String targetWorkstationIdentifier,
   ) async {
     // This will be implemented in the parent screen
     // For now, just clear the dragging state
@@ -800,34 +801,34 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   }
 
   /// Handle canvas tap in edit mode
-  void _handleCanvasTap(TapUpDetails details) {
+  void _processCanvasTap(TapUpDetails tapDetails) {
     if (!widget.isEditMode) return;
-    final localPos = details.localPosition;
+    final localTapPosition = tapDetails.localPosition;
 
     // Account for offset (canvas starts at col 2, row 2)
-    const double offsetX = 2.0;
-    const double offsetY = 2.0;
+    const double horizontalOffsetPixels = 2.0;
+    const double verticalOffsetPixels = 2.0;
 
-    final int gridX = (localPos.dx / gridCellSize).floor() + offsetX.toInt();
-    final int gridY = (localPos.dy / gridCellSize).floor() + offsetY.toInt();
-    final tapCell = Offset(gridX.toDouble(), gridY.toDouble());
+    final int gridColumnNumber = (localTapPosition.dx / gridCellSizePixels).floor() + horizontalOffsetPixels.toInt();
+    final int gridRowNumber = (localTapPosition.dy / gridCellSizePixels).floor() + verticalOffsetPixels.toInt();
+    final tapGridCoordinates = Offset(gridColumnNumber.toDouble(), gridRowNumber.toDouble());
 
     setState(() {
       // Toggle: if a desk exists at this cell, remove it; otherwise add one.
-      final existing = deskLayouts.entries
-          .where((e) => e.value == tapCell && !e.key.startsWith('PILLAR_'))
-          .map((e) => e.key)
+      final existingWorkstationIdentifiers = _deskLayouts.entries
+          .where((entry) => entry.value == tapGridCoordinates && !entry.key.startsWith('PILLAR_'))
+          .map((entry) => entry.key)
           .toList();
 
-      if (existing.isNotEmpty) {
-        for (final key in existing) {
-          deskLayouts.remove(key);
+      if (existingWorkstationIdentifiers.isNotEmpty) {
+        for (final workstationIdentifier in existingWorkstationIdentifiers) {
+          _deskLayouts.remove(workstationIdentifier);
         }
       } else {
         // In edit mode, allow adding custom desks
-        final id =
-            'CUSTOM_${(deskLayouts.length + 1).toString().padLeft(3, '0')}';
-        deskLayouts[id] = tapCell;
+        final customWorkstationIdentifier =
+            'CUSTOM_${(_deskLayouts.length + 1).toString().padLeft(3, '0')}';
+        _deskLayouts[customWorkstationIdentifier] = tapGridCoordinates;
       }
     });
   }
@@ -851,7 +852,7 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
 
       switch (next) {
         case CameraAction.fitAllLabs:
-          _fitAllLabs();
+          _fitAllLabsInView();
           break;
         case CameraAction.zoomIn:
           _zoomIn();
@@ -873,155 +874,196 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
       }
     });
 
-    return _buildInfiniteCanvas(isInspectorOpen);
+    return _buildInfiniteCanvasView(isInspectorOpen);
   }
 
   /// Builds the blueprint-style infinite canvas inside the InteractiveViewer.
-  Widget _buildInfiniteCanvas(bool isInspectorOpen) {
+  Widget _buildInfiniteCanvasView(bool isInspectorOpen) {
     // Canvas sized exactly to lab content (cols 2-33, rows 2-18)
     // 32 columns × 100px = 3200px width
     // 17 rows × 100px = 1700px height
-    const double canvasWidth = 3200.0;
-    const double canvasHeight = 1700.0;
+    const double canvasWidthPixels = 3200.0;
+    const double canvasHeightPixels = 1700.0;
 
     return Focus(
-      focusNode: _focusNode,
-      onKeyEvent: _handleKeyEvent,
+      focusNode: _keyboardFocusNode,
+      onKeyEvent: _processKeyboardEvent,
       autofocus: true,
       child: Listener(
         // Intercept scroll events for smooth zoom
-        onPointerSignal: (event) {
+        onPointerSignal: (pointerSignalEvent) {
           // Check if event has scrollDelta property (indicates scroll event)
           try {
-            final scrollDelta = (event as dynamic).scrollDelta;
+            final scrollDelta = (pointerSignalEvent as dynamic).scrollDelta;
             if (scrollDelta != null) {
-              _handleScrollZoom(event);
+              _processScrollZoomEvent(pointerSignalEvent);
             }
-          } catch (e) {
+          } catch (exception) {
             // Not a scroll event, ignore
           }
         },
-        child: InteractiveViewer(
-          transformationController: _transformationController,
-          constrained: false,
-          boundaryMargin: const EdgeInsets.all(100),
-          minScale: 0.2, // Will be overridden by _enforceMinScale
-          maxScale: 5.0,
-          panEnabled: !widget.isEditMode && !isInspectorOpen, // Lock pan when inspector open
-          onInteractionUpdate: _handleInteractionUpdate, // Smooth zoom on pinch/scroll
-          child: GestureDetector(
-            onTapUp: _handleCanvasTap,
-            child: Container(
-              width: canvasWidth,
-              height: canvasHeight,
-              color: const Color(0xFFF5F5F5), // Off-white background
-              // PERFORMANCE: RepaintBoundary caches the grid as a GPU texture
-              // The 3200x1700px grid with ~600 lines is expensive to repaint
-              // This prevents repainting when desks/drag ghost move above it
-              child: RepaintBoundary(
-                child: CustomPaint(
-                  painter: _GridPainter(cellSize: gridCellSize),
-                  child: Stack(
-                    // PERFORMANCE: Use cached desk widget list
-                    // Generated once in initState, reused on every build
-                    children: _cachedDeskWidgets!,
+        child: ClipRect(
+          child: InteractiveViewer(
+            transformationController: _transformationController,
+            constrained: false,
+            boundaryMargin: const EdgeInsets.all(double.infinity),
+            clipBehavior: Clip.none,
+            minScale: 0.01, // Relaxed for "infinite" feel
+            maxScale: 20.0, // Relaxed for "infinite" feel
+            scaleEnabled: false, // Disable choppy built-in zoom to yield control to custom logic
+            panEnabled: !widget.isEditMode && !isInspectorOpen, // Lock pan when inspector open
+            onInteractionUpdate: _processInteractionUpdate, // Smooth zoom on pinch/scroll
+            child: GestureDetector(
+              onTapUp: _processCanvasTap,
+              child: Container(
+                width: canvasWidthPixels,
+                height: canvasHeightPixels,
+                color: Theme.of(context).scaffoldBackgroundColor, // Background color based on theme
+                // PERFORMANCE: RepaintBoundary caches the grid as a GPU texture
+                // The 3200x1700px grid with ~600 lines is expensive to repaint
+                // This prevents repainting when desks/drag ghost move above it
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    painter: _GridPainter(
+                      gridCellSizePixels: gridCellSizePixels,
+                      gridColor: Theme.of(context).dividerColor, // Grid color based on theme
+                    ),
+                    child: Stack(
+                      // PERFORMANCE: Use cached desk widget list
+                      // Generated once in initState, reused on every build
+                      children: _cachedDeskWidgets!,
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-        ),
-      ),
+        ),      ),
     );
   }
 
   /// Handle interaction updates for smooth zoom
-  void _handleInteractionUpdate(ScaleUpdateDetails details) {
-    // This provides smooth zoom during pinch gestures
-    // The transformation is already applied by InteractiveViewer
-    // We just need to ensure it's smooth
+  void _processInteractionUpdate(ScaleUpdateDetails interactionDetails) {
+    if (interactionDetails.scale == 1.0) return;
+
+    final Matrix4 currentMatrix = _transformationController.value;
+    final double currentScale = currentMatrix.getMaxScaleOnAxis();
+    final double targetScale = (currentScale * interactionDetails.scale).clamp(_minimumAllowedScale ?? 0.1, 5.0);
+
+    final Matrix4 targetMatrix = _calculateZoomTransformationMatrix(
+      currentMatrix,
+      currentScale,
+      targetScale,
+      interactionDetails.localFocalPoint,
+    );
+
+    _transformationController.value = targetMatrix;
   }
 
   /// Handle smooth scroll zoom (cross-platform compatible)
-  void _handleScrollZoom(dynamic event) {
+  void _processScrollZoomEvent(dynamic scrollEvent) {
     if (!mounted) return;
 
     // Access scrollDelta dynamically (works on both web and native)
-    final scrollDelta = (event as dynamic).scrollDelta;
+    final scrollDelta = (scrollEvent as dynamic).scrollDelta;
     if (scrollDelta == null) return;
 
-    // Calculate zoom delta from scroll
-    final double scrollDeltaY = (scrollDelta.dy as num).toDouble();
-    final double zoomFactor = scrollDeltaY > 0 ? 0.9 : 1.1; // Zoom out/in
+    // Handle trackpad panning vs mouse wheel zooming
+    if ((scrollEvent as dynamic).kind == PointerDeviceKind.trackpad) {
+      final double dx = -(scrollDelta.dx as num).toDouble();
+      final double dy = -(scrollDelta.dy as num).toDouble();
 
-    // Get current transformation
-    final currentMatrix = _transformationController.value.clone();
-    final currentScale = currentMatrix.getMaxScaleOnAxis();
+      final Matrix4 baseTransformationMatrix = _accumulatedTargetMatrix ?? _transformationController.value.clone();
+      final double currentScale = baseTransformationMatrix.getMaxScaleOnAxis();
 
-    // Calculate new scale
-    final newScale = (currentScale * zoomFactor).clamp(0.2, 5.0);
+      _accumulatedTargetMatrix = baseTransformationMatrix.clone()..translate(dx / currentScale, dy / currentScale);
 
-    // Get pointer position in widget coordinates
+      // Animate smoothly towards the accumulated target
+      _animateScrollZoomTransformation(_transformationController.value, _accumulatedTargetMatrix!);
+      return;
+    }
+
+    // Proportional Delta: Calculate zoom factor based on scroll displacement
+    // Negative scrollDelta.dy means scroll up (zoom in)
+    final double scrollDeltaVerticalPixels = (scrollDelta.dy as num).toDouble();
+    
+    // Calculate a proportional multiplier (e.g., 0.0015 per pixel)
+    // We clamp the multiplier to prevent extreme jumps from high-precision wheels
+    final double scrollDeltaMultiplier = (scrollDeltaVerticalPixels * 0.0015).clamp(-0.2, 0.2);
+    final double zoomScaleFactor = 1.0 - scrollDeltaMultiplier;
+
+    // Accumulation: Determine starting matrix for the target calculation
+    // If an animation is active, we accumulate on top of its target to prevent stutter
+    final Matrix4 baseTransformationMatrix = _accumulatedTargetMatrix ?? _transformationController.value.clone();
+    final double currentTargetScale = baseTransformationMatrix.getMaxScaleOnAxis();
+
+    // Bound Enforcement: Respect relaxed minScale/maxScale limits
+    final double accumulatedTargetScale = (currentTargetScale * zoomScaleFactor).clamp(0.01, 20.0);
+
+    // Get pointer position in widget coordinates for focal point zoom
     final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
     if (renderBox == null) return;
 
-    // Access position dynamically
-    final position = (event as dynamic).position;
-    final Offset focalPoint = renderBox.globalToLocal(position as Offset);
+    final pointerPosition = (scrollEvent as dynamic).position;
+    final Offset focalPointPixels = renderBox.globalToLocal(pointerPosition as Offset);
 
-    // Calculate zoom around focal point
-    final Matrix4 targetMatrix = _calculateZoomMatrix(
-      currentMatrix,
-      currentScale,
-      newScale,
-      focalPoint,
+    // Calculate the target matrix centered around the cursor focal point
+    _accumulatedTargetMatrix = _calculateZoomTransformationMatrix(
+      baseTransformationMatrix,
+      currentTargetScale,
+      accumulatedTargetScale,
+      focalPointPixels,
     );
 
-    // Animate to target matrix with fast iOS-style animation
-    _animateScrollZoom(currentMatrix, targetMatrix);
+    // Animate smoothly towards the accumulated target
+    _animateScrollZoomTransformation(_transformationController.value, _accumulatedTargetMatrix!);
   }
 
   /// Calculate zoom matrix around a focal point
-  Matrix4 _calculateZoomMatrix(
+  Matrix4 _calculateZoomTransformationMatrix(
     Matrix4 currentMatrix,
     double currentScale,
-    double newScale,
-    Offset focalPoint,
+    double targetScale,
+    Offset focalPointPixels,
   ) {
-    // Get current translation
-    final currentTranslation = currentMatrix.getTranslation();
+    // Get translation from the provided matrix (could be an accumulated target)
+    final currentTranslationVector = currentMatrix.getTranslation();
 
     // Calculate the point in the scene that's under the focal point
-    final scenePointX = (focalPoint.dx - currentTranslation.x) / currentScale;
-    final scenePointY = (focalPoint.dy - currentTranslation.y) / currentScale;
+    final worldHorizontalPixels = (focalPointPixels.dx - currentTranslationVector.x) / currentScale;
+    final worldVerticalPixels = (focalPointPixels.dy - currentTranslationVector.y) / currentScale;
 
-    // Calculate new translation to keep the scene point under the focal point
-    final newTranslationX = focalPoint.dx - (scenePointX * newScale);
-    final newTranslationY = focalPoint.dy - (scenePointY * newScale);
+    // Calculate new translation to keep the scene point under the focal point after scaling
+    final targetTranslationHorizontalPixels = focalPointPixels.dx - (worldHorizontalPixels * targetScale);
+    final targetTranslationVerticalPixels = focalPointPixels.dy - (worldVerticalPixels * targetScale);
 
     // Create new matrix
     return Matrix4.identity()
-      ..translate(newTranslationX, newTranslationY)
-      ..scale(newScale);
+      ..translate(targetTranslationHorizontalPixels, targetTranslationVerticalPixels)
+      ..scale(targetScale);
   }
 
-  /// Animate scroll zoom smoothly
-  void _animateScrollZoom(Matrix4 begin, Matrix4 end) {
-    _scrollZoomController?.dispose();
-    _scrollZoomController = AnimationController(
-      vsync: this,
-      duration: iosScrollZoomDuration, // Fast 150ms for responsive feel
-    );
+  /// Animate scroll zoom smoothly towards the target
+  void _animateScrollZoomTransformation(Matrix4 startMatrix, Matrix4 endMatrix) {
+    // Reuse or create the controller
+    if (_scrollZoomController == null) {
+      _scrollZoomController = AnimationController(
+        vsync: this,
+        duration: iosScrollZoomAnimationDuration,
+      );
+    } else {
+      // If already animating, we reset but keep the current visual position as start
+      _scrollZoomController!.stop();
+    }
 
-    final curvedAnimation = CurvedAnimation(
-      parent: _scrollZoomController!,
-      curve: Curves.easeOutCubic, // Smooth deceleration
-    );
-
+    // Always animate from current visual state to the latest accumulated target
     _scrollZoomAnimation = Matrix4Tween(
-      begin: begin,
-      end: end,
-    ).animate(curvedAnimation);
+      begin: startMatrix,
+      end: endMatrix,
+    ).animate(CurvedAnimation(
+      parent: _scrollZoomController!,
+      curve: Curves.easeOutCubic,
+    ));
 
     _scrollZoomAnimation!.addListener(() {
       if (mounted) {
@@ -1029,14 +1071,19 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
       }
     });
 
-    _scrollZoomController!.forward();
+    _scrollZoomController!.forward().then((_) {
+      // Clear accumulation once we reach the destination
+      if (mounted && _scrollZoomController!.isCompleted) {
+        _accumulatedTargetMatrix = null;
+      }
+    });
   }
 
   /// A pillar (structural obstruction, no interaction).
-  Widget _buildPillar() {
+  Widget _buildStructuralPillar() {
     return Container(
-      width: gridCellSize,
-      height: gridCellSize,
+      width: gridCellSizePixels,
+      height: gridCellSizePixels,
       decoration: BoxDecoration(
         color: const Color(0xFF6B7280), // Solid gray
         border: Border.all(color: const Color(0xFFD1D5DB), width: 1),
@@ -1052,14 +1099,14 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   }
 
   /// A single desk tile on the infinite canvas.
-  Widget _buildCanvasDesk(String deskId) {
+  Widget _buildCanvasWorkstation(String workstationIdentifier) {
     return DeskWidget(
-      deskId: deskId,
-      position: deskLayouts[deskId]!,
-      cellSize: gridCellSize,
+      deskId: workstationIdentifier,
+      position: _deskLayouts[workstationIdentifier]!,
+      cellSize: gridCellSizePixels,
       isEditMode: widget.isEditMode,
-      onTap: () => _loadDeskComponents(deskId),
-      onComponentDrop: (component) => _handleComponentDrop(component, deskId),
+      onTap: () => _loadWorkstationComponents(workstationIdentifier),
+      onComponentDrop: (component) => _handleComponentDrop(component, workstationIdentifier),
     );
   }
 
@@ -1069,10 +1116,10 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
 
   /// Generates the complete 332-desk coordinate map from the Master Blueprint.
   static Map<String, Offset> _generateDeskCoordinates() {
-    final Map<String, Offset> coords = {};
+    final Map<String, Offset> workstationCoordinatesMap = {};
 
     // Lab 6: B-K (2-11), Rows 2-6, 48 desks
-    _addLabDesks(coords, 6, [
+    _addLaboratoryWorkstations(workstationCoordinatesMap, 6, [
       {'row': 2, 'cols': [2, 11], 'start': 1}, // D1-D10
       {'row': 3, 'cols': [2, 11], 'start': 11}, // D11-D20
       {'row': 4, 'cols': [2, 11], 'start': 21}, // D21-D30
@@ -1081,7 +1128,7 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     ]);
 
     // Lab 7: B-G (2-7), Rows 8-9,11-12,14-15,17-18, 48 desks
-    _addLabDesks(coords, 7, [
+    _addLaboratoryWorkstations(workstationCoordinatesMap, 7, [
       {'row': 8, 'cols': [2, 7], 'start': 1}, // D1-D6
       {'row': 9, 'cols': [2, 7], 'start': 7}, // D7-D12
       {'row': 11, 'cols': [2, 7], 'start': 13}, // D13-D18
@@ -1093,7 +1140,7 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     ]);
 
     // Lab 1: M-T (13-20), Rows 2-3,5-6,8-9, 48 desks
-    _addLabDesks(coords, 1, [
+    _addLaboratoryWorkstations(workstationCoordinatesMap, 1, [
       {'row': 2, 'cols': [13, 20], 'start': 1}, // D1-D8
       {'row': 3, 'cols': [13, 20], 'start': 9}, // D9-D16
       {'row': 5, 'cols': [13, 20], 'start': 17}, // D17-D24
@@ -1103,7 +1150,7 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     ]);
 
     // Lab 2: M-T (13-20), Rows 11-12,14-15,17-18, 48 desks
-    _addLabDesks(coords, 2, [
+    _addLaboratoryWorkstations(workstationCoordinatesMap, 2, [
       {'row': 11, 'cols': [13, 20], 'start': 1}, // D1-D8
       {'row': 12, 'cols': [13, 20], 'start': 9}, // D9-D16
       {'row': 14, 'cols': [13, 20], 'start': 17}, // D17-D24
@@ -1113,7 +1160,7 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     ]);
 
     // Lab 3: V-AG (22-33), Rows 2-3,5-6, 46 desks (2 pillars at V5, W5)
-    _addLabDesks(coords, 3, [
+    _addLaboratoryWorkstations(workstationCoordinatesMap, 3, [
       {'row': 2, 'cols': [22, 33], 'start': 1}, // D1-D12
       {'row': 3, 'cols': [22, 33], 'start': 13}, // D13-D24
       {
@@ -1126,7 +1173,7 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     ]);
 
     // Lab 4: V-AG (22-33), Rows 8-9,11-12, 46 desks (2 pillars at V12, W12)
-    _addLabDesks(coords, 4, [
+    _addLaboratoryWorkstations(workstationCoordinatesMap, 4, [
       {'row': 8, 'cols': [22, 33], 'start': 1}, // D1-D12
       {'row': 9, 'cols': [22, 33], 'start': 13}, // D13-D24
       {'row': 11, 'cols': [22, 33], 'start': 25}, // D25-D36 (no pillars on row 11)
@@ -1139,7 +1186,7 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     ]);
 
     // Lab 5: V-AG (22-33), Rows 14-15,17-18, 48 desks
-    _addLabDesks(coords, 5, [
+    _addLaboratoryWorkstations(workstationCoordinatesMap, 5, [
       {'row': 14, 'cols': [22, 33], 'start': 1}, // D1-D12
       {'row': 15, 'cols': [22, 33], 'start': 13}, // D13-D24
       {'row': 17, 'cols': [22, 33], 'start': 25}, // D25-D36
@@ -1147,35 +1194,35 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     ]);
 
     // Add pillar markers (non-interactive structural elements)
-    coords['PILLAR_V5'] = const Offset(22, 5);
-    coords['PILLAR_W5'] = const Offset(23, 5);
-    coords['PILLAR_V12'] = const Offset(22, 12);
-    coords['PILLAR_W12'] = const Offset(23, 12);
+    workstationCoordinatesMap['PILLAR_V5'] = const Offset(22, 5);
+    workstationCoordinatesMap['PILLAR_W5'] = const Offset(23, 5);
+    workstationCoordinatesMap['PILLAR_V12'] = const Offset(22, 12);
+    workstationCoordinatesMap['PILLAR_W12'] = const Offset(23, 12);
 
-    return coords;
+    return workstationCoordinatesMap;
   }
 
   /// Helper to add a lab's desks to the coordinate map.
-  static void _addLabDesks(
-    Map<String, Offset> coords,
-    int labNum,
-    List<Map<String, dynamic>> rows,
+  static void _addLaboratoryWorkstations(
+    Map<String, Offset> workstationCoordinatesMap,
+    int labNumber,
+    List<Map<String, dynamic>> rowConfigurations,
   ) {
-    for (final rowConfig in rows) {
-      final int row = rowConfig['row'];
-      final List<int> colRange = rowConfig['cols'];
-      int deskNum = rowConfig['start'];
-      final List<int>? pillarCols = rowConfig['pillars'];
+    for (final rowConfiguration in rowConfigurations) {
+      final int rowNumber = rowConfiguration['row'];
+      final List<int> columnRange = rowConfiguration['cols'];
+      int workstationNumber = rowConfiguration['start'];
+      final List<int>? pillarColumnNumbers = rowConfiguration['pillars'];
 
-      for (int col = colRange[0]; col <= colRange[1]; col++) {
+      for (int columnNumber = columnRange[0]; columnNumber <= columnRange[1]; columnNumber++) {
         // Skip pillars
-        if (pillarCols != null && pillarCols.contains(col)) {
+        if (pillarColumnNumbers != null && pillarColumnNumbers.contains(columnNumber)) {
           continue;
         }
 
-        final deskId = 'L${labNum}_D${deskNum.toString().padLeft(2, '0')}';
-        coords[deskId] = Offset(col.toDouble(), row.toDouble());
-        deskNum++;
+        final workstationIdentifier = 'L${labNumber}_D${workstationNumber.toString().padLeft(2, '0')}';
+        workstationCoordinatesMap[workstationIdentifier] = Offset(columnNumber.toDouble(), rowNumber.toDouble());
+        workstationNumber++;
       }
     }
   }
@@ -1186,27 +1233,37 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _GridPainter extends CustomPainter {
-  final double cellSize;
+  final double gridCellSizePixels;
+  final Color gridColor;
 
-  _GridPainter({required this.cellSize});
+  _GridPainter({
+    required this.gridCellSizePixels,
+    required this.gridColor,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = const Color(0xFFE5E7EB) // Light gray grid lines
+    final gridPaint = Paint()
+      ..color = gridColor // Thematic grid color
       ..strokeWidth = 0.5;
 
     // Draw vertical lines
-    for (double x = 0; x <= size.width; x += cellSize) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+    for (double horizontalPositionPixels = 0; horizontalPositionPixels <= size.width; horizontalPositionPixels += gridCellSizePixels) {
+      canvas.drawLine(Offset(horizontalPositionPixels, 0), Offset(horizontalPositionPixels, size.height), gridPaint);
     }
 
     // Draw horizontal lines
-    for (double y = 0; y <= size.height; y += cellSize) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    for (double verticalPositionPixels = 0; verticalPositionPixels <= size.height; verticalPositionPixels += gridCellSizePixels) {
+      canvas.drawLine(Offset(0, verticalPositionPixels), Offset(size.width, verticalPositionPixels), gridPaint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _GridPainter oldDelegate) {
+    return oldDelegate.gridColor != gridColor;
+  }
 }
+
+
+
+
