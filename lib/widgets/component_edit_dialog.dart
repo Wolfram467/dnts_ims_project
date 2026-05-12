@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/repository_providers.dart';
+import '../providers/map_state_provider.dart';
 import '../models/hardware_component.dart';
 
 /// ============================================================================
@@ -38,11 +39,12 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
   String? _dntsSerialNumberErrorText;
 
   // Valid statuses
-  static const List<String> _validDeploymentStatuses = [
-    'FUNCTIONAL',
-    'DEFECTIVE',
-    'MISSING',
-    'FOR REPAIR',
+  final List<String> _deploymentStatuses = [
+    'Deployed',
+    'Borrowed',
+    'Under Maintenance',
+    'Storage',
+    'Retired',
   ];
 
   @override
@@ -56,16 +58,15 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
     );
     
     // Safe Status Mapping logic
-    final rawStatus = widget.component.status.toUpperCase();
-    final bool statusExists = _validDeploymentStatuses.contains(rawStatus);
+    final rawStatus = widget.component.status;
     
-    if (statusExists) {
-      _selectedDeploymentStatus = rawStatus;
-    } else if (rawStatus == 'DEPLOYED') {
-      _selectedDeploymentStatus = 'FUNCTIONAL';
-    } else {
-      _selectedDeploymentStatus = 'FUNCTIONAL';
-    }
+    // Find matching status case-insensitively, or default to 'Deployed'
+    final matchedStatus = _deploymentStatuses.firstWhere(
+      (status) => status.toLowerCase() == rawStatus.toLowerCase(),
+      orElse: () => 'Deployed',
+    );
+    
+    _selectedDeploymentStatus = matchedStatus;
   }
 
   @override
@@ -163,6 +164,7 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
         );
 
         // Notify parent to refresh
+        ref.read(refreshTriggerProvider.notifier).state++;
         widget.onSaved();
 
         // Close dialog
@@ -183,21 +185,130 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
     }
   }
 
+  Future<void> _retireComponent() async {
+    setState(() {
+      _selectedDeploymentStatus = 'Retired';
+    });
+    await _saveChanges();
+  }
+
+  Future<void> _deleteComponent() async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+          title: const Text('Delete Component'),
+          content: const Text('Are you sure you want to delete this component?'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              style: TextButton.styleFrom(
+                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                foregroundColor: Colors.black,
+              ),
+              child: const Text('CANCEL'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: TextButton.styleFrom(
+                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                foregroundColor: Colors.red,
+              ),
+              child: const Text('DELETE'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm == true) {
+      setState(() {
+        _isSavingInProgress = true;
+      });
+
+      final wasDeleteSuccessful = await ref.read(workstationRepositoryProvider)
+          .deleteWorkstationComponent(widget.workstationIdentifier, widget.component.category);
+
+      setState(() {
+        _isSavingInProgress = false;
+      });
+
+      if (wasDeleteSuccessful) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✓ ${widget.component.category} deleted successfully'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+          ref.read(refreshTriggerProvider.notifier).state++;
+          widget.onSaved();
+          Navigator.of(context).pop();
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('❌ Failed to delete component'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+    const defaultBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.zero,
+      borderSide: BorderSide(color: Colors.black, width: 1),
+    );
+
+    final inputDecoration = InputDecoration(
+      border: defaultBorder,
+      enabledBorder: defaultBorder,
+      focusedBorder: const OutlineInputBorder(
+        borderRadius: BorderRadius.zero,
+        borderSide: BorderSide(color: Colors.black, width: 2),
       ),
+      errorBorder: const OutlineInputBorder(
+        borderRadius: BorderRadius.zero,
+        borderSide: BorderSide(color: Colors.red, width: 1),
+      ),
+      focusedErrorBorder: const OutlineInputBorder(
+        borderRadius: BorderRadius.zero,
+        borderSide: BorderSide(color: Colors.red, width: 2),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      filled: true,
+      fillColor: Colors.white,
+    );
+
+    return Dialog(
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.zero,
+      ),
+      backgroundColor: Colors.transparent,
+      elevation: 0,
       child: Container(
         width: 500,
         padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: Colors.black, width: 1),
+          borderRadius: BorderRadius.zero,
+        ),
         child: Form(
           key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
               // Header
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -231,13 +342,10 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
               // DNTS Serial Number
               TextFormField(
                 controller: _dntsSerialNumberController,
-                decoration: InputDecoration(
+                decoration: inputDecoration.copyWith(
                   labelText: 'DNTS Serial Number',
                   hintText: 'CT1_LAB5_MR01',
                   errorText: _dntsSerialNumberErrorText,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
                   prefixIcon: const Icon(Icons.qr_code),
                 ),
                 validator: (value) {
@@ -260,12 +368,9 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
               // Manufacturer Serial Number
               TextFormField(
                 controller: _manufacturingSerialNumberController,
-                decoration: InputDecoration(
+                decoration: inputDecoration.copyWith(
                   labelText: 'Manufacturer Serial Number',
                   hintText: 'Enter manufacturer serial',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
                   prefixIcon: const Icon(Icons.tag),
                 ),
                 validator: (value) {
@@ -280,14 +385,11 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
               // Status Dropdown
               DropdownButtonFormField<String>(
                 value: _selectedDeploymentStatus,
-                decoration: InputDecoration(
+                decoration: inputDecoration.copyWith(
                   labelText: 'Status',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
                   prefixIcon: const Icon(Icons.info_outline),
                 ),
-                items: _validDeploymentStatuses.map((status) {
+                items: _deploymentStatuses.map((status) {
                   return DropdownMenuItem(
                     value: status,
                     child: Text(status),
@@ -301,45 +403,85 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
                   }
                 },
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 32),
 
               // Action Buttons
               Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  TextButton(
-                    onPressed: _isSavingInProgress ? null : () => Navigator.of(context).pop(),
-                    child: const Text('Cancel'),
+                  // Left Side Actions
+                  Row(
+                    children: [
+                      TextButton(
+                        onPressed: _isSavingInProgress ? null : _deleteComponent,
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.red,
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.zero,
+                          ),
+                        ),
+                        child: const Text('DELETE'),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: _isSavingInProgress ? null : _retireComponent,
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.orange,
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.zero,
+                          ),
+                        ),
+                        child: const Text('RETIRE'),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed: _isSavingInProgress ? null : _saveChanges,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF374151),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 12,
+                  
+                  // Right Side Actions
+                  Row(
+                    children: [
+                      TextButton(
+                        onPressed: _isSavingInProgress ? null : () => Navigator.of(context).pop(),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.black,
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.zero,
+                          ),
+                        ),
+                        child: const Text('CANCEL'),
                       ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: _isSavingInProgress ? null : _saveChanges,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF374151),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 16,
+                          ),
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.zero,
+                          ),
+                        ),
+                        child: _isSavingInProgress
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                ),
+                              )
+                            : const Text('SAVE CHANGES', style: TextStyle(letterSpacing: 1.0)),
                       ),
-                    ),
-                    child: _isSavingInProgress
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                            ),
-                          )
-                        : const Text('Save Changes'),
+                    ],
                   ),
                 ],
               ),
             ],
           ),
+        ),
         ),
       ),
     );

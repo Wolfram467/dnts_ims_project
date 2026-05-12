@@ -7,6 +7,7 @@ import '../utils/drag_boundary_calculator.dart';
 import '../widgets/map_canvas_widget.dart';
 import '../widgets/inspector_panel_widget.dart';
 import '../widgets/inventory_dock_widget.dart';
+import '../widgets/create_component_dialog.dart';
 import '../services/pdf_report_service.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -64,6 +65,22 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
           ),
         ],
       ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          showDialog(
+            context: context,
+            builder: (context) => const CreateComponentDialog(),
+          );
+        },
+        backgroundColor: const Color(0xFF374151),
+        foregroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.zero,
+        ),
+        elevation: 0,
+        child: const Icon(Icons.add),
+      ),
     );
   }
 
@@ -73,9 +90,10 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
 
   Widget _buildScreenHeader(BuildContext context) {
     final isDockExpanded = ref.watch(dockProvider.select((state) => state.isExpanded));
+    final bool isCompact = MediaQuery.of(context).size.height < 600;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      padding: EdgeInsets.symmetric(horizontal: 24, vertical: isCompact ? 8 : 16),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor, width: 1)),
@@ -105,14 +123,15 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
                     color: isDockExpanded 
                         ? Theme.of(context).colorScheme.surface 
                         : Theme.of(context).colorScheme.onSurface,
-                    size: 24,
+                    size: isCompact ? 20 : 24,
                   ),
                 ),
               ),
               const SizedBox(width: 16),
               Text(
                 'Inventory Management System',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontSize: isCompact ? 16 : 24,
                       fontWeight: FontWeight.w300,
                       letterSpacing: 2,
                       color: Theme.of(context).colorScheme.onSurface,
@@ -121,26 +140,7 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
             ],
           ),
           Row(
-            children: [
-              IconButton(
-                icon: Icon(Icons.zoom_in, color: Theme.of(context).colorScheme.onSurface),
-                onPressed: () => ref.read(cameraControlProvider.notifier).zoomIn(),
-                style: IconButton.styleFrom(
-                  side: BorderSide(color: Theme.of(context).dividerColor, width: 1),
-                  shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton(
-                icon: Icon(Icons.keyboard, color: Theme.of(context).colorScheme.onSurface),
-                onPressed: () => _displayKeyboardShortcutsDialog(context),
-                tooltip: 'Keyboard Shortcuts',
-                style: IconButton.styleFrom(
-                  side: BorderSide(color: Theme.of(context).dividerColor, width: 1),
-                  shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-                ),
-              ),
-            ],
+            children: [],
           ),
         ],
       ),
@@ -180,7 +180,6 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
   void _deactivateInspectorPanel(WidgetRef widgetRef) {
     widgetRef.read(inspectorStateProvider.notifier).closeInspector();
     widgetRef.read(activeDeskProvider.notifier).clearActiveDesk();
-    widgetRef.read(activeDeskComponentsProvider.notifier).clearComponents();
     widgetRef.read(selectedDeskProvider.notifier).clearSelection();
   }
 

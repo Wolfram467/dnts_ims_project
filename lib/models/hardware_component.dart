@@ -1,14 +1,18 @@
 class HardwareComponent {
-  final String dntsSerial;
-  final String mfgSerial;
-  final String category;
-  final String status;
+  String dntsSerial = '';
+  String mfgSerial = '';
+  String category = '';
+  String status = '';
+  String brand = '';
+  String? dateAcquired;
 
-  const HardwareComponent({
-    required this.dntsSerial,
-    required this.mfgSerial,
-    required this.category,
-    required this.status,
+  HardwareComponent({
+    this.dntsSerial = '',
+    this.mfgSerial = '',
+    this.category = '',
+    this.status = '',
+    this.brand = '',
+    this.dateAcquired,
   });
 
   factory HardwareComponent.fromJson(Map<String, dynamic> json) {
@@ -17,6 +21,8 @@ class HardwareComponent {
       mfgSerial: json['mfg_serial'] as String? ?? '',
       category: json['category'] as String? ?? '',
       status: json['status'] as String? ?? '',
+      brand: json['notes'] as String? ?? '',
+      dateAcquired: json['date_acquired'] as String?,
     );
   }
 
@@ -26,6 +32,8 @@ class HardwareComponent {
       'mfg_serial': mfgSerial,
       'category': category,
       'status': status,
+      'notes': brand,
+      if (dateAcquired != null) 'date_acquired': dateAcquired,
     };
   }
 
@@ -34,12 +42,16 @@ class HardwareComponent {
     String? mfgSerial,
     String? category,
     String? status,
+    String? brand,
+    String? dateAcquired,
   }) {
     return HardwareComponent(
       dntsSerial: dntsSerial ?? this.dntsSerial,
       mfgSerial: mfgSerial ?? this.mfgSerial,
       category: category ?? this.category,
       status: status ?? this.status,
+      brand: brand ?? this.brand,
+      dateAcquired: dateAcquired ?? this.dateAcquired,
     );
   }
 }

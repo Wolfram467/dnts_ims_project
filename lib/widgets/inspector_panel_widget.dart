@@ -13,7 +13,8 @@ import 'component_edit_dialog.dart';
 // ═══════════════════════════════════════════════════════════════════════════
 
 class InspectorPanelWidget extends ConsumerStatefulWidget {
-  const InspectorPanelWidget({super.key});
+  final bool isMobile;
+  const InspectorPanelWidget({super.key, this.isMobile = false});
 
   @override
   ConsumerState<InspectorPanelWidget> createState() => _InspectorPanelWidgetState();
@@ -36,7 +37,8 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
     // Watch Riverpod state for reactive updates
     final isInspectorOpen = ref.watch(inspectorStateProvider);
     final activeWorkstationIdentifier = ref.watch(activeDeskProvider);
-    final activeWorkstationComponents = ref.watch(activeDeskComponentsProvider);
+    final activeWorkstationComponentsAsync = ref.watch(activeDeskComponentsProvider);
+    final activeWorkstationComponents = activeWorkstationComponentsAsync.valueOrNull ?? [];
 
     // Don't render if inspector is closed
     if (!isInspectorOpen || activeWorkstationIdentifier == null) {
@@ -58,45 +60,7 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
             left: BorderSide(color: Color(0xFFD1D5DB), width: 1), // Swiss border
           ),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Header
-            _buildPanelHeader(context, activeWorkstationIdentifier),
-
-            // Visual Desk Layout
-            Expanded(
-              child: activeWorkstationComponents.isEmpty
-                  ? _buildEmptyStateView()
-                  : _buildVisualWorkstationLayout(context, activeWorkstationIdentifier, activeWorkstationComponents),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // HEADER
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  Widget _buildPanelHeader(BuildContext context, String workstationIdentifier) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: const BoxDecoration(
-        color: Color(0xFFFFFFFF),
-        border: Border(
-          bottom: BorderSide(color: Color(0xFFD1D5DB), width: 1),
-        ),
-      ),
-      child: Text(
-        workstationIdentifier,
-        style: const TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.w300,
-          letterSpacing: 1.5,
-          color: Color(0xFF111827),
-        ),
+        child: _buildVisualWorkstationLayout(context, activeWorkstationIdentifier, activeWorkstationComponents),
       ),
     );
   }
@@ -128,55 +92,55 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
     String workstationIdentifier,
     List<HardwareComponent> workstationComponents,
   ) {
+    final bool isCompact = MediaQuery.of(context).size.height < 600;
+
+    Widget buildRow1() => Row(
+      children: [
+        Expanded(
+          flex: 7,
+          child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Keyboard'),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          flex: 3,
+          child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Mouse'),
+        ),
+      ],
+    );
+
+    Widget content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Row 1: Keyboard and Mouse
+        isCompact ? SizedBox(height: 90, child: buildRow1()) : Expanded(flex: 2, child: buildRow1()),
+        const SizedBox(height: 12),
+
+        // Row 2: Monitor (Double Height)
+        isCompact 
+          ? SizedBox(height: 180, child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Monitor'))
+          : Expanded(flex: 4, child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Monitor')),
+        const SizedBox(height: 12),
+
+        // Row 3: System Unit with nested SSD (Double Height)
+        isCompact
+          ? SizedBox(height: 180, child: _buildSystemUnitWithNestedSsdSlot(context, workstationIdentifier, workstationComponents))
+          : Expanded(flex: 4, child: _buildSystemUnitWithNestedSsdSlot(context, workstationIdentifier, workstationComponents)),
+        const SizedBox(height: 12),
+
+        // Row 4: AVR
+        isCompact
+          ? SizedBox(height: 90, child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'AVR'))
+          : Expanded(flex: 2, child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'AVR')),
+        const SizedBox(height: 24),
+
+        // Close Button
+        _buildPanelCloseButton(),
+      ],
+    );
+
     return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Row 1: Keyboard and Mouse
-          Expanded(
-            flex: 2,
-            child: Row(
-              children: [
-                Expanded(
-                  flex: 7,
-                  child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Keyboard'),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  flex: 3,
-                  child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Mouse'),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          // Row 2: Monitor (Double Height)
-          Expanded(
-            flex: 4,
-            child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Monitor'),
-          ),
-          const SizedBox(height: 12),
-
-          // Row 3: System Unit with nested SSD (Double Height)
-          Expanded(
-            flex: 4,
-            child: _buildSystemUnitWithNestedSsdSlot(context, workstationIdentifier, workstationComponents),
-          ),
-          const SizedBox(height: 12),
-
-          // Row 4: AVR
-          Expanded(
-            flex: 2,
-            child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'AVR'),
-          ),
-          const SizedBox(height: 24),
-
-          // Close Button
-          _buildPanelCloseButton(),
-        ],
-      ),
+      padding: EdgeInsets.all(isCompact ? 8 : 24),
+      child: isCompact ? SingleChildScrollView(child: content) : content,
     );
   }
 
@@ -362,12 +326,9 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
     );
   }
 
-  /// Refresh workstation data after edit
+  /// Refresh workstation data after edit (handled automatically by Stream)
   Future<void> _refreshWorkstationData(String workstationIdentifier) async {
-    final workstationComponents = await ref.read(workstationRepositoryProvider).getWorkstationComponents(workstationIdentifier);
-    if (workstationComponents != null && mounted) {
-      ref.read(activeDeskComponentsProvider.notifier).setComponents(workstationComponents);
-    }
+    // Left for callback signature compatibility, but UI updates automatically via StreamProvider.
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -375,8 +336,10 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
   // ═══════════════════════════════════════════════════════════════════════════
 
   Widget _buildPanelCloseButton() {
+    final bool isCompact = MediaQuery.of(context).size.height < 600;
+
     return SizedBox(
-      height: 56,
+      height: isCompact ? 36 : 56,
       child: ElevatedButton(
         onPressed: _closeInspector,
         style: ElevatedButton.styleFrom(
@@ -405,9 +368,12 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
 
   /// Close the inspector panel and reset state
   void _closeInspector() {
-    ref.read(inspectorStateProvider.notifier).closeInspector();
+    if (widget.isMobile) {
+      Navigator.of(context).pop();
+    } else {
+      ref.read(inspectorStateProvider.notifier).closeInspector();
+    }
     ref.read(activeDeskProvider.notifier).clearActiveDesk();
-    ref.read(activeDeskComponentsProvider.notifier).clearComponents();
     ref.read(selectedDeskProvider.notifier).clearSelection();
 
     // Note: The camera reset animation should be triggered by the parent

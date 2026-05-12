@@ -1,5 +1,4 @@
-import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// ============================================================================
 /// LAB DATA GENERATOR
@@ -66,6 +65,8 @@ class LabDataGenerator {
           'category': category,
           'mfg_serial': 'UNKNOWN',
           'dnts_serial': dntsSerial,
+          'status': 'FUNCTIONAL',
+          'brand': 'UNKNOWN',
         });
       }
 
@@ -76,61 +77,78 @@ class LabDataGenerator {
   }
 
   /// ============================================================================
-  /// AUTO-SEED FUNCTIONS
+  /// AUTO-SEED FUNCTIONS (ONLINE-ONLY)
   /// ============================================================================
 
-  /// Check if labs have been auto-seeded
-  static Future<bool> isAutoSeeded() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('labs_auto_seeded') ?? false;
-  }
-
-  /// Auto-seed all labs (1-4) with generated data
-  static Future<void> autoSeedAllLabs() async {
+  /// Utility to seed the remote Supabase database instead of local storage.
+  /// Ensure you only call this when absolutely necessary, as it performs bulk inserts.
+  static Future<void> seedSupabaseDatabase() async {
     print('\n═══════════════════════════════════════════════════════════════');
-    print('🌱 AUTO-SEEDING LABS 1-7 WITH GENERATED DATA');
+    print('🌱 SEEDING SUPABASE REMOTE DB (LABS 1-7)');
     print('═══════════════════════════════════════════════════════════════\n');
 
-    final prefs = await SharedPreferences.getInstance();
+    final supabase = Supabase.instance.client;
     int totalWorkstations = 0;
+
+    // 1. Fetch all locations and map name to UUID
+    print('Fetching location UUIDs...');
+    final List<dynamic> locationsResponse = await supabase.from('locations').select('id, name');
+    final Map<String, String> locationNameMap = {};
+    for (final loc in locationsResponse) {
+      locationNameMap[loc['name']] = loc['id'].toString();
+    }
+
+    // 2. Generate payloads
+    final List<Map<String, dynamic>> allComponentsToInsert = [];
 
     for (final labEntry in labDeskCounts.entries) {
       final labNumber = labEntry.key;
       final deskCount = labEntry.value;
 
-      print('📊 Generating Lab $labNumber data ($deskCount workstations)...');
-
       final labData = generateLabData(labNumber);
 
-      // Save each workstation to SharedPreferences
       for (final entry in labData.entries) {
-        final workstationId = entry.key;
+        final workstationId = entry.key; // e.g. L1_D01
         final components = entry.value;
+        final locationId = locationNameMap[workstationId];
 
-        final jsonString = jsonEncode(components);
-        await prefs.setString('workstation_$workstationId', jsonString);
+        if (locationId == null) {
+          print('Warning: Location $workstationId not found in Supabase locations table. Skipping.');
+          continue;
+        }
+
+        for (final comp in components) {
+          allComponentsToInsert.add({
+            'dnts_serial': comp['dnts_serial'],
+            'mfg_serial': comp['mfg_serial'],
+            'category': comp['category'],
+            'status': comp['status'],
+            'brand': comp['brand'],
+            'current_loc_id': locationId,
+          });
+        }
         totalWorkstations++;
       }
-
-      print('  ✓ Lab $labNumber seeded: $deskCount workstations');
     }
 
-    // Mark as seeded
-    await prefs.setBool('labs_auto_seeded', true);
-    await prefs.setString('auto_seed_timestamp', DateTime.now().toIso8601String());
+    // 3. Batch insert using chunks to prevent hitting limits
+    print('Inserting ${allComponentsToInsert.length} components into serialized_assets...');
+    const chunkSize = 100;
+    for (int i = 0; i < allComponentsToInsert.length; i += chunkSize) {
+      final end = (i + chunkSize < allComponentsToInsert.length) ? i + chunkSize : allComponentsToInsert.length;
+      final chunk = allComponentsToInsert.sublist(i, end);
+      
+      try {
+        await supabase.from('serialized_assets').upsert(chunk, onConflict: 'dnts_serial');
+        print('  ✓ Inserted chunk ${i ~/ chunkSize + 1}');
+      } catch (e) {
+        print('  ❌ Error inserting chunk: $e');
+      }
+    }
 
-    print('\n✅ AUTO-SEED COMPLETE!');
+    print('\n✅ REMOTE SUPABASE SEED COMPLETE!');
     print('📦 Total workstations seeded: $totalWorkstations');
-    print('🔒 Auto-seed flag set (will not seed again)');
     print('═══════════════════════════════════════════════════════════════\n');
-  }
-
-  /// Force re-seed (clears auto-seed flag and re-generates data)
-  static Future<void> forceReseed() async {
-    print('🔄 Force re-seeding labs 1-7...');
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('labs_auto_seeded', false);
-    await autoSeedAllLabs();
   }
 
   /// ============================================================================
@@ -149,7 +167,7 @@ class LabDataGenerator {
 
   /// Validate DNTS serial format
   static bool isValidDntsSerial(String serial) {
-    // Format: CT1_LAB[1-7]_[MR|M|K|SU|SSD|AVR][01-99]
+    // Format: CT1_LAB[1-7]_(MR|M|K|SU|SSD|AVR)\d{2}$
     final regex = RegExp(r'^CT1_LAB[1-7]_(MR|M|K|SU|SSD|AVR)\d{2}$');
     return regex.hasMatch(serial);
   }

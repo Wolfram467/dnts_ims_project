@@ -22,9 +22,8 @@ class InventoryDockWidget extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final dockState = ref.watch(dockProvider);
     final isExpanded = dockState.isExpanded;
-    final isLoading = dockState.isLoading;
-    final groupedComponents = dockState.groupedAuditComponents;
     final selectedFacility = ref.watch(selectedFacilityProvider);
+    final inventoryAsync = ref.watch(facilityInventoryProvider);
 
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 400),
@@ -48,18 +47,64 @@ class InventoryDockWidget extends ConsumerWidget {
               ),
           ],
         ),
-        child: Column(
-          children: [
-            _buildSidebarHeader(context, ref, selectedFacility, groupedComponents),
-            Expanded(
-              child: isLoading
-                  ? const Center(child: CircularProgressIndicator(color: Colors.white))
-                  : _buildAuditView(context, ref, groupedComponents),
-            ),
-          ],
+        child: inventoryAsync.when(
+          data: (inventory) {
+            final groupedComponents = _groupInventory(inventory);
+            return Column(
+              children: [
+                _buildSidebarHeader(context, ref, selectedFacility, groupedComponents),
+                Expanded(child: _buildAuditView(context, ref, groupedComponents)),
+              ],
+            );
+          },
+          loading: () => const Center(child: CircularProgressIndicator(color: Colors.black)),
+          error: (e, st) => Center(child: Text('Error: $e')),
         ),
       ),
     );
+  }
+
+  Map<String, Map<String, List<Map<String, dynamic>>>> _groupInventory(List<Map<String, dynamic>> inventory) {
+    final Map<String, Map<String, List<Map<String, dynamic>>>> result = {};
+    for (final item in inventory) {
+      final deskId = item['location']?['name'] as String? ?? 'Unknown';
+      final facilityName = _mapDeskIdentifierToFacilityName(deskId);
+      final category = item['category'] as String? ?? 'Unknown';
+
+      final enrichedItem = Map<String, dynamic>.from(item);
+      enrichedItem['desk_id'] = deskId;
+
+      result.putIfAbsent(facilityName, () => {});
+      result[facilityName]!.putIfAbsent(category, () => []);
+      result[facilityName]![category]!.add(enrichedItem);
+    }
+    
+    final sortedResult = <String, Map<String, List<Map<String, dynamic>>>>{};
+    final sortedFacilities = result.keys.toList()..sort();
+    for (final f in sortedFacilities) {
+      final sortedCategoriesMap = <String, List<Map<String, dynamic>>>{};
+      final sortedCategories = result[f]!.keys.toList()..sort();
+      for (final c in sortedCategories) {
+        final list = result[f]![c]!;
+        list.sort((a, b) => (a['desk_id'] as String).compareTo(b['desk_id'] as String));
+        sortedCategoriesMap[c] = list;
+      }
+      sortedResult[f] = sortedCategoriesMap;
+    }
+    return sortedResult;
+  }
+
+  String _mapDeskIdentifierToFacilityName(String deskIdentifier) {
+    if (deskIdentifier.startsWith('L')) {
+      final laboratoryMatch = RegExp(r'L(\d+)').firstMatch(deskIdentifier);
+      if (laboratoryMatch != null) {
+        return 'Lab ${laboratoryMatch.group(1)}';
+      }
+    }
+    if (deskIdentifier.startsWith('Others')) return 'Others';
+    if (deskIdentifier.startsWith('Storage')) return 'Storage';
+    if (deskIdentifier.startsWith('CT2')) return 'CT2';
+    return 'Unknown Facility';
   }
 
   Widget _buildSidebarHeader(
@@ -68,83 +113,10 @@ class InventoryDockWidget extends ConsumerWidget {
     String selectedFacility,
     Map<String, Map<String, List<Map<String, dynamic>>>> groupedComponents,
   ) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: Theme.of(context).dividerColor, width: 1),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'INVENTORY AUDIT',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.5,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-              ),
-              IconButton(
-                onPressed: () => ref.read(dockProvider.notifier).toggleExpanded(),
-                icon: Icon(Icons.close, color: Theme.of(context).colorScheme.onSurface, size: 20),
-                tooltip: 'Close Sidebar',
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Theme.of(context).dividerColor, width: 1),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: selectedFacility,
-                      isExpanded: true,
-                      dropdownColor: Theme.of(context).colorScheme.surface,
-                      icon: Icon(Icons.domain, size: 18, color: Theme.of(context).colorScheme.onSurface),
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurface,
-                        fontWeight: FontWeight.w500,
-                        fontSize: 13,
-                      ),
-                      items: availableFacilities
-                          .map((facility) => DropdownMenuItem(value: facility, child: Text(facility)))
-                          .toList(),
-                      onChanged: (newFacility) {
-                        if (newFacility != null) {
-                          ref.read(selectedFacilityProvider.notifier).state = newFacility;
-                          ref.read(dockProvider.notifier).loadFacilityAuditData();
-                        }
-                      },
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                decoration: BoxDecoration(
-                  border: Border.all(color: Theme.of(context).dividerColor, width: 1),
-                ),
-                child: IconButton(
-                  icon: Icon(Icons.print, size: 18, color: Theme.of(context).colorScheme.onSurface),
-                  onPressed: () => _showPrintSettingsDialog(context, ref, selectedFacility, groupedComponents),
-                  tooltip: 'Generate Report',
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
+    // SECURE UX: All header UI elements (Title, Close, Dropdown, Print) 
+    // have been visually removed as requested, while retaining the print 
+    // methods in the class for future relocation.
+    return const SizedBox.shrink();
   }
 
   void _showPrintSettingsDialog(

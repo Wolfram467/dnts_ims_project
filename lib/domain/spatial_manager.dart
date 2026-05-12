@@ -7,7 +7,7 @@ class SpatialManager {
   /// 
   /// Supported facility identifiers:
   /// - 'CT1': Returns all desks across all 7 labs.
-  /// - 'Lab 1' through 'Lab 7': Returns desks for specific laboratories.
+  /// - 'Lab 1' through 'Lab 7' and 'Laboratory 1' through 'Laboratory 7': Returns desks for specific laboratories.
   /// - 'Storage', 'Others', 'CT2': Returns empty lists (placeholders).
   List<WorkstationConfig> getLayoutForFacility(String facilityId) {
     final List<WorkstationConfig> allConfigs = _generateAllConfigurations();
@@ -16,7 +16,7 @@ class SpatialManager {
       return allConfigs;
     }
 
-    if (facilityId.startsWith('Lab ')) {
+    if (facilityId.startsWith('Lab ') || facilityId.startsWith('Laboratory ')) {
       final labNumber = facilityId.split(' ').last;
       final labPrefix = 'L${labNumber}_';
       return allConfigs.where((config) => config.id.startsWith(labPrefix)).toList();

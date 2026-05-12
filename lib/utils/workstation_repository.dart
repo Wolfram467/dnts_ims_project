@@ -1,70 +1,110 @@
-import 'dart:convert';
-import 'package:isar/isar.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/hardware_component.dart';
-import '../models/workstation_model.dart';
 
 /// ============================================================================
-/// WORKSTATION REPOSITORY
+/// WORKSTATION REPOSITORY (ONLINE-ONLY)
 /// ============================================================================
-/// Centralized storage layer for workstation and component data.
-/// Handles CRUD operations for Isar database.
+/// Centralized data layer for workstation and component data.
+/// Uses Supabase as the absolute source of truth.
+/// Automatically resolves logical desk names (e.g. 'L5_D01') to location UUIDs.
 /// ============================================================================
 
 class WorkstationRepository {
-  Isar? _isarDatabaseInstance;
+  final SupabaseClient _supabase = Supabase.instance.client;
 
-  /// Initialize Isar database
-  Future<void> initializeIsar() async {
-    final bool isAlreadyInitialized = _isarDatabaseInstance == null;
-    if (isAlreadyInitialized == false) return;
+  /// Helper to resolve a location name (like 'L5_D01') to its UUID in the database.
+  Future<String?> resolveLocationId(String locationName) async {
+    try {
+      final cleanName = locationName.trim();
+      
+      // 1. Prioritize EXACT match first (case-insensitive, handling duplicates safely)
+      var response = await _supabase
+          .from('locations')
+          .select('id')
+          .ilike('name', cleanName)
+          .limit(1);
+          
+      if (response != null && response.isNotEmpty) {
+        return response.first['id'] as String?;
+      }
 
-    final documentDirectory = await getApplicationDocumentsDirectory();
-    _isarDatabaseInstance = await Isar.open(
-      [WorkstationSchema],
-      directory: documentDirectory.path,
-    );
-  }
+      // 2. Fallback to fuzzy matching if exact match fails
+      String searchTerm = cleanName;
+      if (cleanName.startsWith('L') && cleanName.contains('_')) {
+        final match = RegExp(r'L(\d+)_').firstMatch(cleanName);
+        if (match != null) {
+          searchTerm = '%Lab%${match.group(1)}%';
+        }
+      } else if (cleanName.toLowerCase().contains('storage')) {
+        searchTerm = '%Storage%';
+      } else {
+        searchTerm = '%$cleanName%';
+      }
 
-  /// Helper to get Isar instance safely
-  Future<Isar> _getIsar() async {
-    await initializeIsar();
-    final database = _isarDatabaseInstance;
-    if (database == null) {
-      throw Exception('Isar database failed to initialize');
+      final fallbackResponse = await _supabase
+          .from('locations')
+          .select('id')
+          .ilike('name', searchTerm)
+          .limit(1);
+          
+      if (fallbackResponse != null && fallbackResponse.isNotEmpty) {
+        return fallbackResponse.first['id'] as String?;
+      }
+      
+      return null;
+    } catch (e) {
+      print('Error resolving location name $locationName: $e');
+      return null;
     }
-    return database;
   }
 
   /// ============================================================================
   /// READ OPERATIONS
   /// ============================================================================
 
-  /// Get all components for a specific workstation
-  Future<List<HardwareComponent>?> getWorkstationComponents(
+  /// Get all components for a specific workstation name (e.g. 'L5_D01')
+  Future<List<HardwareComponent>> getWorkstationComponents(
     String workstationIdentifier,
   ) async {
-    final isar = await _getIsar();
-    final workstation = await isar.workstations.filter()
-        .identifierEqualTo(workstationIdentifier)
-        .findFirst();
-
-    if (workstation == null) {
-      return null;
-    }
-
     try {
-      final decodedWorkstationData = jsonDecode(workstation.componentsJson);
-      if (decodedWorkstationData is List) {
-        return decodedWorkstationData
-            .map((item) => HardwareComponent.fromJson(Map<String, dynamic>.from(item as Map)))
-            .toList();
+      final locationId = await resolveLocationId(workstationIdentifier);
+      if (locationId == null) return [];
+
+      final response = await _supabase
+          .from('serialized_assets')
+          .select()
+          .eq('current_loc_id', locationId)
+          .neq('status', 'Retired'); // <--- Must be Title Case
+
+      final List<HardwareComponent> components = [];
+      for (final row in response) {
+        components.add(HardwareComponent.fromJson(row));
       }
+      return components;
     } catch (exception) {
-      print('Error decoding workstation data: $exception');
+      print('Error retrieving workstation data for $workstationIdentifier: $exception');
+      return [];
+    }
+  }
+
+  /// Stream all components for a specific workstation name for real-time UI updates
+  Stream<List<HardwareComponent>> streamWorkstationComponents(String workstationIdentifier) async* {
+    final locationId = await resolveLocationId(workstationIdentifier);
+    if (locationId == null) {
+      yield [];
+      return;
     }
 
-    return null;
+    yield* _supabase
+        .from('serialized_assets')
+        .stream(primaryKey: ['id'])
+        .eq('current_loc_id', locationId)
+        .map((data) {
+          return data
+              .where((row) => row['status'] != 'Retired') // <--- Must be Title Case
+              .map((row) => HardwareComponent.fromJson(row))
+              .toList();
+        });
   }
 
   /// Get a specific component from a workstation by category
@@ -72,60 +112,24 @@ class WorkstationRepository {
     String workstationIdentifier,
     String componentCategory,
   ) async {
-    final workstationComponents = await getWorkstationComponents(workstationIdentifier);
-    if (workstationComponents == null) return null;
-
+    final components = await getWorkstationComponents(workstationIdentifier);
     try {
-      return workstationComponents.firstWhere(
-        (component) => component.category.toLowerCase() == componentCategory.toLowerCase(),
+      return components.firstWhere(
+        (c) => c.category.toLowerCase() == componentCategory.toLowerCase(),
       );
-    } catch (exception) {
+    } catch (_) {
       return null;
     }
   }
 
-  /// Check if a workstation has data
   Future<bool> hasWorkstationData(String workstationIdentifier) async {
-    final workstationComponents = await getWorkstationComponents(workstationIdentifier);
-    final bool isPresent = workstationComponents == null;
-    final bool isNotEmpty = isPresent == false && workstationComponents.isNotEmpty;
-    return isNotEmpty;
+    final components = await getWorkstationComponents(workstationIdentifier);
+    return components.isNotEmpty;
   }
 
   /// ============================================================================
   /// WRITE OPERATIONS
   /// ============================================================================
-
-  /// Save complete workstation data
-  Future<bool> saveWorkstationComponents(
-    String workstationIdentifier,
-    List<HardwareComponent> workstationComponents,
-  ) async {
-    try {
-      final isar = await _getIsar();
-      final serializedWorkstationData = jsonEncode(
-        workstationComponents.map((component) => component.toJson()).toList(),
-      );
-
-      await isar.writeTxn(() async {
-        final existingWorkstation = await isar.workstations.filter()
-            .identifierEqualTo(workstationIdentifier)
-            .findFirst();
-
-        final workstation = existingWorkstation ?? Workstation();
-        workstation.identifier = workstationIdentifier;
-        workstation.componentsJson = serializedWorkstationData;
-
-        await isar.workstations.put(workstation);
-      });
-
-      print('Saved workstation: $workstationIdentifier (${workstationComponents.length} components)');
-      return true;
-    } catch (exception) {
-      print('Error saving workstation data: $exception');
-      return false;
-    }
-  }
 
   /// Update a specific component in a workstation
   Future<bool> updateWorkstationComponent(
@@ -134,34 +138,60 @@ class WorkstationRepository {
     HardwareComponent updatedComponent,
   ) async {
     try {
-      final workstationComponents = await getWorkstationComponents(workstationIdentifier);
-      if (workstationComponents == null) {
-        print('Workstation not found: $workstationIdentifier');
-        return false;
-      }
+      final locationId = await resolveLocationId(workstationIdentifier);
+      if (locationId == null) return false;
 
-      // Find and update the component
-      final mutableWorkstationComponents = List<HardwareComponent>.from(workstationComponents);
-      bool isComponentFound = false;
-      for (int index = 0; index < mutableWorkstationComponents.length; index++) {
-        final bool isCategoryMatch = mutableWorkstationComponents[index].category.toLowerCase() ==
-            componentCategory.toLowerCase();
-        if (isCategoryMatch) {
-          mutableWorkstationComponents[index] = updatedComponent;
-          isComponentFound = true;
-          break;
-        }
-      }
+      // Find the specific component ID in Supabase
+      final response = await _supabase
+          .from('serialized_assets')
+          .select('id')
+          .eq('current_loc_id', locationId)
+          .eq('category', componentCategory)
+          .maybeSingle();
 
-      if (isComponentFound == false) {
-        print('Component not found: $componentCategory in $workstationIdentifier');
-        return false;
-      }
+      if (response == null) return false;
 
-      // Save updated components
-      return await saveWorkstationComponents(workstationIdentifier, mutableWorkstationComponents);
+      final assetId = response['id'];
+
+      await _supabase
+          .from('serialized_assets')
+          .update({
+            'dnts_serial': updatedComponent.dntsSerial,
+            'mfg_serial': updatedComponent.mfgSerial,
+            'status': updatedComponent.status,
+            'notes': updatedComponent.brand,
+          })
+          .eq('id', assetId);
+
+      return true;
     } catch (exception) {
       print('Error updating component: $exception');
+      return false;
+    }
+  }
+
+  /// Insert a new component into a workstation
+  Future<bool> insertWorkstationComponent(
+    String workstationIdentifier,
+    HardwareComponent newComponent,
+  ) async {
+    try {
+      final locationId = await resolveLocationId(workstationIdentifier);
+      if (locationId == null) return false;
+
+      await _supabase.from('serialized_assets').insert({
+        'dnts_serial': newComponent.dntsSerial,
+        'mfg_serial': newComponent.mfgSerial,
+        'category': newComponent.category,
+        'status': newComponent.status,
+        'notes': newComponent.brand,
+        'current_loc_id': locationId,
+        // Depending on schema, we may need a 'designated_lab_id_fkey' or similar. 
+        // Assuming current_loc_id is enough for this prototype.
+      });
+      return true;
+    } catch (exception) {
+      print('Error inserting component: $exception');
       return false;
     }
   }
@@ -170,35 +200,34 @@ class WorkstationRepository {
   /// DELETE OPERATIONS
   /// ============================================================================
 
-  /// Delete a workstation's data
-  Future<bool> deleteWorkstation(String workstationIdentifier) async {
+  /// Delete a specific component from a workstation
+  Future<bool> deleteWorkstationComponent(String workstationIdentifier, String componentCategory) async {
     try {
-      final isar = await _getIsar();
-      await isar.writeTxn(() async {
-        await isar.workstations.filter()
-            .identifierEqualTo(workstationIdentifier)
-            .deleteFirst();
-      });
-      print('Deleted workstation: $workstationIdentifier');
+      final locationId = await resolveLocationId(workstationIdentifier);
+      if (locationId == null) return false;
+
+      // Find the specific component ID in Supabase
+      final response = await _supabase
+          .from('serialized_assets')
+          .select('id')
+          .eq('current_loc_id', locationId)
+          .eq('category', componentCategory)
+          .maybeSingle();
+
+      if (response == null) return false;
+
+      final assetId = response['id'];
+
+      await _supabase
+          .from('serialized_assets')
+          .delete()
+          .eq('id', assetId);
+
       return true;
     } catch (exception) {
-      print('Error deleting workstation: $exception');
+      print('Error deleting component: $exception');
       return false;
     }
-  }
-
-  /// Clear all workstation data
-  Future<int> clearAllWorkstations() async {
-    print('Clearing all workstation data...');
-    final isar = await _getIsar();
-    
-    int removedWorkstationCount = 0;
-    await isar.writeTxn(() async {
-      removedWorkstationCount = await isar.workstations.where().deleteAll();
-    });
-
-    print('Cleared $removedWorkstationCount workstations from storage');
-    return removedWorkstationCount;
   }
 
   /// ============================================================================
@@ -207,7 +236,6 @@ class WorkstationRepository {
 
   /// Validate DNTS serial format
   bool isValidDntsSerialNumber(String serialNumber) {
-    // Format: CT1_LAB[1-7]_[MR|M|K|SU|SSD|AVR][01-99]
     final serialNumberRegex = RegExp(r'^CT1_LAB[1-7]_(MR|M|K|SU|SSD|AVR)\d{2}$');
     return serialNumberRegex.hasMatch(serialNumber);
   }
@@ -215,10 +243,11 @@ class WorkstationRepository {
   /// Validate component status
   bool isValidDeploymentStatus(String deploymentStatus) {
     const validDeploymentStatuses = [
-      'FUNCTIONAL',
-      'DEFECTIVE',
-      'MISSING',
-      'FOR REPAIR',
+      'Deployed',
+      'Borrowed',
+      'Under Maintenance',
+      'Storage',
+      'Retired',
     ];
     return validDeploymentStatuses.contains(deploymentStatus);
   }
@@ -229,74 +258,34 @@ class WorkstationRepository {
     String currentWorkstationIdentifier,
     String componentCategory,
   ) async {
-    // Extract lab number from workstation ID (e.g., "L5_D01" -> 5)
-    final facilityLabMatch = RegExp(r'L(\d+)_').firstMatch(currentWorkstationIdentifier);
-    if (facilityLabMatch == null) return true;
+    try {
+      final response = await _supabase
+          .from('serialized_assets')
+          .select('id')
+          .eq('dnts_serial', dntsSerialNumber)
+          .maybeSingle();
 
-    final labNumberString = facilityLabMatch.group(1);
-    final isar = await _getIsar();
-    
-    final labWorkstations = await isar.workstations.filter()
-        .identifierStartsWith('L${labNumberString}_')
-        .findAll();
+      if (response == null) return true; // Not found anywhere, so it is unique
 
-    for (final workstation in labWorkstations) {
-      final workstationIdentifier = workstation.identifier;
-      final workstationComponents = await getWorkstationComponents(workstationIdentifier);
+      // If it is found, it's only valid if it belongs to the EXACT same component we are editing.
+      final locationId = await resolveLocationId(currentWorkstationIdentifier);
+      if (locationId == null) return false;
+      
+      final currentAssetResponse = await _supabase
+          .from('serialized_assets')
+          .select('id')
+          .eq('current_loc_id', locationId)
+          .eq('category', componentCategory)
+          .maybeSingle();
 
-      if (workstationComponents == null) {
-        continue;
+      if (currentAssetResponse != null && currentAssetResponse['id'] == response['id']) {
+        return true; // The found duplicate is actually the same record
       }
-      for (final component in workstationComponents) {
-          // Skip the current component being edited
-          final bool isCurrentComponent = workstationIdentifier == currentWorkstationIdentifier &&
-              component.category == componentCategory;
-          if (isCurrentComponent) {
-            continue;
-          }
 
-          // Check for duplicate
-          if (component.dntsSerial == dntsSerialNumber) {
-            return false;
-          }
-        }
-      }
+      return false;
+    } catch (exception) {
+      print('Error checking serial number uniqueness: $exception');
+      return false;
     }
-
-    return true;
-  }
-
-  /// ============================================================================
-  /// QUERY OPERATIONS
-  /// ============================================================================
-
-  /// Get all workstation IDs in storage
-  Future<List<String>> getAllWorkstationIdentifiers() async {
-    final isar = await _getIsar();
-    final workstations = await isar.workstations.where().findAll();
-    final identifiers = workstations.map((workstation) => workstation.identifier).toList();
-    identifiers.sort();
-    return identifiers;
-  }
-
-  /// Get all workstation IDs for a specific lab
-  Future<List<String>> getLabWorkstationIdentifiers(int labNumber) async {
-    final allWorkstationIdentifiers = await getAllWorkstationIdentifiers();
-    return allWorkstationIdentifiers.where((identifier) => identifier.startsWith('L${labNumber}_')).toList();
-  }
-
-  /// Count total workstations in storage
-  Future<int> countWorkstations() async {
-    final isar = await _getIsar();
-    return await isar.workstations.count();
-  }
-
-  /// ============================================================================
-  /// ACCESSOR
-  /// ============================================================================
-  
-  /// Provides direct access to Isar for cross-workstation transactions
-  Future<Isar> getDatabaseInstance() async {
-    return await _getIsar();
   }
 }

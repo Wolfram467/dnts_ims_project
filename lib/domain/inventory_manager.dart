@@ -1,109 +1,182 @@
-import 'dart:convert';
-import 'package:isar/isar.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/result.dart';
-import '../models/hardware_component.dart';
-import '../models/workstation_model.dart';
 import '../utils/workstation_repository.dart';
 import '../services/cloud_sync_service.dart';
+import '../models/hardware_component.dart';
 
 /// Domain manager for orchestrating complex inventory operations.
-/// Ensures transactional integrity and business rule enforcement.
+/// Uses Supabase to enforce rules and maintain data integrity.
 class InventoryManager {
   final WorkstationRepository _repository;
   final CloudSyncService _syncService;
 
   InventoryManager(this._repository, this._syncService);
 
-  /// Moves a hardware component from one workstation to another atomically.
+  /// Validates the Swiss Rule (preventing duplicate component categories at a single desk).
+  /// Storage locations are exempt from this rule.
+  Future<Result<void, Exception>> validateCapacity(String location, String category) async {
+    if (location.toLowerCase() == 'storage') {
+      return const Success(null);
+    }
+
+    try {
+      final components = await _repository.getWorkstationComponents(location);
+      final alreadyHasCategory = components.any(
+        (c) => c.category.toLowerCase() == category.toLowerCase(),
+      );
+
+      if (alreadyHasCategory) {
+        return Failure(Exception('Location $location already has a $category.'));
+      }
+
+      return const Success(null);
+    } catch (error) {
+      return Failure(Exception('Capacity validation failed: $error'));
+    }
+  }
+
+  /// Creates a new component after ensuring the location can accommodate it.
+  Future<Result<void, Exception>> createComponent(String location, HardwareComponent newComponent) async {
+    final validation = await validateCapacity(location, newComponent.category);
+    
+    bool isValid = false;
+    Exception? validationError;
+    
+    validation.fold(
+      (success) => isValid = true,
+      (failure) => validationError = failure,
+    );
+    
+    if (!isValid) {
+      return Failure(validationError!);
+    }
+    
+    try {
+      final supabase = Supabase.instance.client;
+      final userId = supabase.auth.currentUser?.id;
+
+      if (userId != null) {
+        // Resolve exact location ID
+        final locationId = await _repository.resolveLocationId(location);
+        
+        if (locationId != null) {
+          
+          // 2. Insert into remote Supabase serialized_assets table
+          await supabase.from('serialized_assets').insert({
+            'dnts_serial': newComponent.dntsSerial,
+            'mfg_serial': newComponent.mfgSerial,
+            'category': newComponent.category,
+            'designated_lab_id': locationId,
+            'current_loc_id': locationId,
+            'status': newComponent.status, // Must be 'Deployed' or 'Storage'
+            'notes': newComponent.brand,
+            if (newComponent.dateAcquired != null) 'date_acquired': newComponent.dateAcquired,
+          });
+
+          // 3. Find the ID of the newly inserted asset
+          Map<String, dynamic>? assetResponse;
+          int retries = 0;
+          while (assetResponse == null && retries < 5) {
+            assetResponse = await supabase.from('serialized_assets').select('id').eq('dnts_serial', newComponent.dntsSerial).maybeSingle();
+            if (assetResponse == null) {
+              retries++;
+              await Future.delayed(const Duration(milliseconds: 500));
+            }
+          }
+          
+          // 4. Log the movement
+          if (assetResponse != null) {
+            await supabase.from('movement_logs').insert({
+              'asset_id': assetResponse['id'],
+              'action_by': userId,
+              'previous_loc_id': null,
+              'new_loc_id': locationId,
+              'status_change': 'Initial Deployment',
+            });
+          }
+        } else {
+          print('⚠️ Warning: Could not find database location ID for $location');
+          return Failure(Exception('Could not resolve database location ID for $location'));
+        }
+      }
+
+      return const Success(null);
+    } catch (error) {
+      return Failure(Exception('Component creation failed: $error'));
+    }
+  }
+  /// Moves a hardware component from one workstation to another.
   /// 
   /// Logic:
-  /// 1. Initializes the Isar database instance.
-  /// 2. Executes a write transaction for atomicity.
-  /// 3. Fetches and updates both source and target workstation data.
-  /// 4. Enforces the Swiss Rule (one component category per desk).
-  /// 5. Commits changes or rolls back on exception.
-  /// 6. Synchronizes the change to the cloud if the transaction succeeds.
+  /// 1. Validates the Swiss Rule (one component category per desk) via the repository.
+  /// 2. Executes an update on the Supabase `serialized_assets` table.
+  /// 3. Synchronizes the change log if needed.
+  /// 4. Logs movement history.
   /// 
   /// Returns [Success] if the move completed, or [Failure] with an explanation.
   Future<Result<void, Exception>> moveComponent({
     required String componentId,
-    required String fromWorkstationId,
     required String toWorkstationId,
   }) async {
     try {
-      final isar = await _repository.getDatabaseInstance();
+      // 1. Validate Swiss Rule: Check if the target workstation already has this category
+      final supabase = Supabase.instance.client;
+      
+      final componentResponse = await supabase
+          .from('serialized_assets')
+          .select('id, category, current_loc_id')
+          .eq('dnts_serial', componentId)
+          .maybeSingle();
+          
+      if (componentResponse == null) {
+        return Failure(Exception('Component "$componentId" not found.'));
+      }
+      
+      final category = componentResponse['category'] as String;
+      final assetId = componentResponse['id'];
+      final previousLocId = componentResponse['current_loc_id'];
 
-      await isar.writeTxn(() async {
-        // 1. Fetch both workstation entities from Isar
-        final workstations = isar.workstations;
-        final sourceWorkstation = await workstations.filter()
-            .identifierEqualTo(fromWorkstationId)
-            .findFirst();
-        final targetWorkstation = await workstations.filter()
-            .identifierEqualTo(toWorkstationId)
-            .findFirst();
+      // Check target workstation capacity
+      final targetComponents = await _repository.getWorkstationComponents(toWorkstationId);
+      final alreadyHasCategory = targetComponents.any(
+        (c) => c.category.toLowerCase() == category.toLowerCase(),
+      );
 
-        if (sourceWorkstation == null) {
-          throw Exception('Source workstation "$fromWorkstationId" not found in database');
-        }
+      if (alreadyHasCategory) {
+        return Failure(Exception('Target workstation "$toWorkstationId" already has a $category.'));
+      }
 
-        // 2. Decode source components and find the target component
-        final List<dynamic> sourceJson = jsonDecode(sourceWorkstation.componentsJson);
-        final sourceComponents = sourceJson.map((item) => HardwareComponent.fromJson(Map<String, dynamic>.from(item as Map))).toList();
+      // 2. Resolve the new location ID
+      final newLocationId = await _repository.resolveLocationId(toWorkstationId);
+          
+      if (newLocationId == null) {
+         return Failure(Exception('Target location "$toWorkstationId" not found in database.'));
+      }
 
-        HardwareComponent? componentToMove;
-        final updatedSourceList = <HardwareComponent>[];
+      // 3. Update the component's location
+      await supabase
+          .from('serialized_assets')
+          .update({'current_loc_id': newLocationId})
+          .eq('dnts_serial', componentId);
 
-        for (final component in sourceComponents) {
-          if (component.dntsSerial == componentId) {
-            componentToMove = component;
-          } else {
-            updatedSourceList.add(component);
-          }
-        }
+      // 4. Log the movement
+      final userId = supabase.auth.currentUser?.id;
+      if (userId != null) {
+        await supabase.from('movement_logs').insert({
+          'asset_id': assetId,
+          'action_by': userId,
+          'previous_loc_id': previousLocId,
+          'new_loc_id': newLocationId,
+          'status_change': 'Location Transfer',
+        });
+      }
 
-        if (componentToMove == null) {
-          throw Exception('Component "$componentId" not found in workstation "$fromWorkstationId"');
-        }
-
-        // 3. Decode target components and verify capacity (Swiss Rule)
-        final targetComponentsList = <HardwareComponent>[];
-        final bool isTargetPresent = targetWorkstation == null;
-        if (isTargetPresent == false) {
-          final List<dynamic> targetJson = jsonDecode(targetWorkstation.componentsJson);
-          targetComponentsList.addAll(targetJson.map((item) => HardwareComponent.fromJson(Map<String, dynamic>.from(item as Map))));
-        }
-
-        final categoryToMatch = componentToMove.category.toLowerCase();
-        final bool alreadyHasCategory = targetComponentsList.any(
-          (component) => component.category.toLowerCase() == categoryToMatch,
-        );
-
-        if (alreadyHasCategory) {
-          throw Exception('Target workstation "$toWorkstationId" already has a ${componentToMove.category}');
-        }
-
-        // 4. Update both workstation states
-        final updatedTargetList = [...targetComponentsList, componentToMove];
-
-        sourceWorkstation.componentsJson = jsonEncode(updatedSourceList.map((c) => c.toJson()).toList());
-        
-        final targetEntity = targetWorkstation ?? Workstation();
-        targetEntity.identifier = toWorkstationId;
-        targetEntity.componentsJson = jsonEncode(updatedTargetList.map((c) => c.toJson()).toList());
-
-        // 5. Persist both changes within the same transaction
-        await workstations.put(sourceWorkstation);
-        await workstations.put(targetEntity);
-      });
-
-      // 6. Cloud Sync (Background)
-      // Only reached if the transaction above succeeds.
+      // 5. Optional Cloud Sync logging
       _syncService.syncComponentMove(componentId, toWorkstationId);
 
       return const Success(null);
     } catch (error) {
-      return Failure(Exception('Unexpected error during atomic component move: $error'));
+      return Failure(Exception('Error during component move: $error'));
     }
   }
 }

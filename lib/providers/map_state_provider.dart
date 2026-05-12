@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/hardware_component.dart';
+import '../providers/repository_providers.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PHASE 2: STATE MANAGEMENT MIGRATION
@@ -126,52 +129,14 @@ final inspectorStateProvider = NotifierProvider<InspectorStateNotifier, bool>(
 // These manage other pieces of state that were in InteractiveMapScreen
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Manages the list of components for the currently active desk.
-/// This is loaded when a desk is clicked and displayed in the inspector panel.
-class ActiveDeskComponentsNotifier
-    extends Notifier<List<HardwareComponent>> {
-  @override
-  List<HardwareComponent> build() {
-    return []; // Empty list initially
-  }
-
-  /// Set the components for the active desk
-  void setComponents(List<HardwareComponent> components) {
-    state = components;
-  }
-
-  /// Clear the components
-  void clearComponents() {
-    state = [];
-  }
-
-  /// Add a component to the list
-  void addComponent(HardwareComponent component) {
-    state = [...state, component];
-  }
-
-  /// Remove a component by serial number
-  void removeComponent(String dntsSerial) {
-    state = state
-        .where((component) => component.dntsSerial != dntsSerial)
-        .toList();
-  }
-
-  /// Update a component at a specific index
-  void updateComponent(int index, HardwareComponent updatedComponent) {
-    if (index >= 0 && index < state.length) {
-      final newList = [...state];
-      newList[index] = updatedComponent;
-      state = newList;
-    }
-  }
-}
-
-/// Provider for the active desk components
-final activeDeskComponentsProvider =
-    NotifierProvider<ActiveDeskComponentsNotifier, List<HardwareComponent>>(
-  () => ActiveDeskComponentsNotifier(),
-);
+/// Provider for the active desk components (Real-time Supabase Stream)
+final activeDeskComponentsProvider = StreamProvider<List<HardwareComponent>>((ref) {
+  final deskId = ref.watch(activeDeskProvider);
+  if (deskId == null) return Stream.value([]);
+  
+  final repository = ref.watch(workstationRepositoryProvider);
+  return repository.streamWorkstationComponents(deskId);
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -355,3 +320,68 @@ final cameraControlProvider =
     NotifierProvider<CameraControlNotifier, CameraAction?>(
   () => CameraControlNotifier(),
 );
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GLOBAL REACTIVE INVENTORY SYNCHRONIZATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Acts as the single source of truth for the Map and Audit sidebar.
+/// Streams all non-Retired assets matching the selected facility.
+final facilityInventoryProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
+  final controller = StreamController<List<Map<String, dynamic>>>();
+  final supabase = Supabase.instance.client;
+  final selectedFacility = ref.watch(selectedFacilityProvider);
+
+  Future<void> fetchAndEmit() async {
+    try {
+      final response = await supabase
+          .from('serialized_assets')
+          .select('*, location:locations!serialized_assets_current_loc_id_fkey!inner(name)')
+          .neq('status', 'Retired');
+          
+      if (!controller.isClosed) {
+        final filtered = (response as List<dynamic>).where((asset) {
+          final locName = asset['location']?['name'] as String? ?? '';
+          if (selectedFacility == 'CT1') return true;
+          if (selectedFacility.startsWith('Lab ')) {
+             final labNum = selectedFacility.split(' ').last;
+             return locName.startsWith('L$labNum');
+          }
+          return true; // Fallback
+        }).cast<Map<String, dynamic>>().toList();
+        
+        controller.add(filtered);
+      }
+    } catch (e) {
+      if (!controller.isClosed) {
+        controller.addError(e);
+      }
+    }
+  }
+
+  fetchAndEmit();
+
+  final channel = supabase.channel('public:serialized_assets_inventory').onPostgresChanges(
+    event: PostgresChangeEvent.all,
+    schema: 'public',
+    table: 'serialized_assets',
+    callback: (payload) {
+      fetchAndEmit();
+    },
+  ).subscribe();
+
+  ref.onDispose(() {
+    supabase.removeChannel(channel);
+    controller.close();
+  });
+
+  return controller.stream;
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Tracks whether the user is currently selecting a location for a new component.
+final isLocationPickingModeProvider = StateProvider<bool>((ref) => false);
+
+/// Persists the draft inputs of the component creation form during location picking.
+final draftComponentProvider = StateProvider<Map<String, String>>((ref) => {});

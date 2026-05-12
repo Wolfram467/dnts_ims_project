@@ -50,6 +50,15 @@ class DeskWidget extends ConsumerWidget {
       selectedDeskProvider.select((selectedId) => selectedId == deskId),
     );
 
+    // Watch facility inventory for this desk's components
+    final hasInventory = ref.watch(
+      facilityInventoryProvider.select((asyncValue) {
+        final list = asyncValue.valueOrNull;
+        if (list == null) return false;
+        return list.any((asset) => asset['location']?['name'] == deskId);
+      }),
+    );
+
     // OPTIMIZATION: We don't need to watch activeDeskProvider here
     // The desk doesn't visually change when it becomes active
     // Only the inspector panel needs to know about the active desk
@@ -80,17 +89,34 @@ class DeskWidget extends ConsumerWidget {
                   width: isHovering ? 2 : 1,
                 ),
               ),
-              child: Center(
-                child: Text(
-                  deskId,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    color: Theme.of(context).colorScheme.onSurface, // Text color based on theme
-                    letterSpacing: 0.5,
+              child: Stack(
+                children: [
+                  Center(
+                    child: Text(
+                      deskId,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: Theme.of(context).colorScheme.onSurface, // Text color based on theme
+                        letterSpacing: 0.5,
+                      ),
+                    ),
                   ),
-                ),
+                  if (hasInventory)
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: Container(
+                        width: 4,
+                        height: 4,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF0055FF), // Swiss Blue
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),

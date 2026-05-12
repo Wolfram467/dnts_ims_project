@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'add_asset_dialog.dart';
+import '../widgets/create_component_dialog.dart';
 
 class InventoryMasterScreen extends StatefulWidget {
   final String userRole;
@@ -252,17 +252,6 @@ class _InventoryMasterScreenState extends State<InventoryMasterScreen> {
 
   bool get _canEdit => widget.userRole == 'dnts_head' || widget.userRole == 'lab_ta';
 
-  Future<void> _showAddAssetDialog() async {
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => const AddAssetDialog(),
-    );
-
-    if (result == true) {
-      _loadAssets();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -446,10 +435,16 @@ class _InventoryMasterScreenState extends State<InventoryMasterScreen> {
         ),
       ],
       ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
       floatingActionButton: _canEdit
           ? FloatingActionButton(
-              onPressed: _showAddAssetDialog,
-              backgroundColor: Colors.black,
+              onPressed: () {
+                showDialog(
+                  context: context,
+                  builder: (context) => const CreateComponentDialog(),
+                );
+              },
+              backgroundColor: const Color(0xFF374151),
               foregroundColor: Colors.white,
               shape: const RoundedRectangleBorder(
                 borderRadius: BorderRadius.zero,

@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,6 +13,8 @@ import '../domain/spatial_manager.dart';
 import '../utils/keyboard_shortcuts.dart';
 import '../services/camera_state_service.dart';
 import 'desk_widget.dart';
+import 'inspector_panel_widget.dart';
+import 'create_component_dialog.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PHASE 8: SPATIAL LOGIC EXTERNALIZATION
@@ -67,12 +70,16 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   /// Flag to prevent loading state during initialization
   bool _isInitializing = true;
 
-  /// Scroll zoom animation controller
-  AnimationController? _scrollZoomController;
-  Animation<Matrix4>? _scrollZoomAnimation;
+  /// Zoom animation controller
+  late AnimationController _zoomAnimationController;
+  late Animation<Matrix4> _zoomAnimation;
 
   /// The target transformation matrix being accumulated during rapid scroll events
-  Matrix4? _accumulatedTargetMatrix;
+  late Matrix4 _targetMatrix;
+
+  late AnimationController _physicsController;
+  Animation<Offset>? _physicsAnimation;
+  Offset _currentPanOffset = Offset.zero;
   
   // ═══════════════════════════════════════════════════════════════════════════
   // CONSTANTS
@@ -98,6 +105,25 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     super.initState();
     _transformationController = TransformationController();
     _transformationController.addListener(_onCameraTransformationChanged);
+    _zoomAnimationController = AnimationController(vsync: this, duration: const Duration(milliseconds: 60));
+
+    _zoomAnimationController.addListener(() {
+      final currentValue = _zoomAnimation.value;
+      // ignore: unnecessary_null_comparison
+      if (currentValue == null) return;
+      _transformationController.value = currentValue;
+    });
+
+    _physicsController = AnimationController.unbounded(vsync: this);
+    _physicsController.addListener(() {
+      final animValue = _physicsAnimation?.value;
+      if (animValue == null) return;
+      final currentScale = _transformationController.value.getMaxScaleOnAxis();
+      _currentPanOffset = _clampOffset(animValue);
+      _transformationController.value = Matrix4.identity()
+        ..translate(_currentPanOffset.dx, _currentPanOffset.dy)
+        ..scale(currentScale);
+    });
 
     // Initialize focus node for keyboard shortcuts
     _keyboardFocusNode = FocusNode();
@@ -205,7 +231,8 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     _transformationController.removeListener(_onCameraTransformationChanged);
     _transformationController.dispose();
     _snapAnimationController?.dispose();
-    _scrollZoomController?.dispose();
+    _zoomAnimationController.dispose();
+    _physicsController.dispose();
     _keyboardFocusNode.dispose();
     _cameraStateSaveDebounceTimer?.cancel();
     super.dispose();
@@ -340,10 +367,12 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
         _panCameraView(panStepPixels, 0);
         break;
       case MapShortcutAction.zoomIn:
+        if (ref.read(inspectorStateProvider)) return;
         _zoomIn();
         _displayShortcutFeedbackMessage('Zoom In');
         break;
       case MapShortcutAction.zoomOut:
+        if (ref.read(inspectorStateProvider)) return;
         _zoomOut();
         _displayShortcutFeedbackMessage('Zoom Out');
         break;
@@ -705,7 +734,6 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
 
     ref.read(inspectorStateProvider.notifier).closeInspector();
     ref.read(activeDeskProvider.notifier).clearActiveDesk();
-    ref.read(activeDeskComponentsProvider.notifier).clearComponents();
     ref.read(selectedDeskProvider.notifier).clearSelection();
 
     CameraStateService.clearActiveDeskState();
@@ -747,6 +775,16 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
 
   /// Load desk components
   Future<void> _loadWorkstationComponents(String workstationIdentifier) async {
+    final isPickingMode = ref.read(isLocationPickingModeProvider);
+    if (isPickingMode) {
+      ref.read(isLocationPickingModeProvider.notifier).state = false;
+      showDialog(
+        context: context,
+        builder: (_) => CreateComponentDialog(initialLocation: workstationIdentifier),
+      );
+      return;
+    }
+
     print('🖱️ Desk clicked: $workstationIdentifier');
 
     ref.read(selectedDeskProvider.notifier).selectDesk(workstationIdentifier);
@@ -757,20 +795,28 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
       }
     });
 
-    final workstationComponents = await ref.read(workstationRepositoryProvider).getWorkstationComponents(workstationIdentifier);
+    ref.read(activeDeskProvider.notifier).setActiveDesk(workstationIdentifier);
+    CameraStateService.saveActiveDeskState(workstationIdentifier);
+    await _animateToWorkstationFocus(workstationIdentifier);
 
-    if (workstationComponents != null && workstationComponents.isNotEmpty) {
-      ref.read(activeDeskProvider.notifier).setActiveDesk(workstationIdentifier);
-      ref.read(activeDeskComponentsProvider.notifier).setComponents(workstationComponents);
-      ref.read(inspectorStateProvider.notifier).openInspector();
-      CameraStateService.saveActiveDeskState(workstationIdentifier);
-      await _animateToWorkstationFocus(workstationIdentifier);
+    final isMobile = MediaQuery.of(context).size.width < 600;
+    if (isMobile) {
+      if (mounted) {
+        showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (context) => const InspectorPanelWidget(isMobile: true),
+        ).then((_) {
+          if (mounted) {
+            ref.read(activeDeskProvider.notifier).clearActiveDesk();
+            ref.read(selectedDeskProvider.notifier).clearSelection();
+            CameraStateService.clearActiveDeskState();
+          }
+        });
+      }
     } else {
-      ref.read(activeDeskProvider.notifier).setActiveDesk(workstationIdentifier);
-      ref.read(activeDeskComponentsProvider.notifier).clearComponents();
       ref.read(inspectorStateProvider.notifier).openInspector();
-      CameraStateService.saveActiveDeskState(workstationIdentifier);
-      await _animateToWorkstationFocus(workstationIdentifier);
     }
   }
 
@@ -789,7 +835,6 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     final inventoryManager = ref.read(inventoryManagerProvider);
     final result = await inventoryManager.moveComponent(
       componentId: draggedComponent.dntsSerial,
-      fromWorkstationId: sourceWorkstationIdentifier,
       toWorkstationId: targetWorkstationIdentifier,
     );
 
@@ -898,6 +943,7 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
       autofocus: true,
       child: Listener(
         onPointerSignal: (pointerSignalEvent) {
+          if (isInspectorOpen) return;
           try {
             final scrollDelta = (pointerSignalEvent as dynamic).scrollDelta;
             if (scrollDelta != null) {
@@ -907,38 +953,86 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
             // Not a scroll event
           }
         },
-        child: ClipRect(
-          child: InteractiveViewer(
-            transformationController: _transformationController,
-            constrained: false,
-            boundaryMargin: const EdgeInsets.all(double.infinity),
-            clipBehavior: Clip.none,
-            minScale: _minimumAllowedScale ?? 0.1,
-            maxScale: 5.0,
-            scaleEnabled: false,
-            panEnabled: !widget.isEditMode && !isInspectorOpen,
-            onInteractionUpdate: _processInteractionUpdate,
-            child: GestureDetector(
-              onTapUp: _processCanvasTap,
-              child: Container(
-                width: canvasWidthPixels,
-                height: canvasHeightPixels,
-                color: Theme.of(context).scaffoldBackgroundColor,
-                child: RepaintBoundary(
-                  child: CustomPaint(
-                    painter: _GridPainter(
-                      gridCellSizePixels: gridCellSizePixels,
-                      gridColor: Theme.of(context).dividerColor,
-                    ),
-                    child: Stack(
-                      children: _cachedDeskWidgets ?? [],
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onScaleStart: (details) {
+            _physicsController.stop();
+            final currentMatrix = _transformationController.value;
+            _currentPanOffset = Offset(
+              currentMatrix.getTranslation().x,
+              currentMatrix.getTranslation().y,
+            );
+          },
+          onScaleUpdate: (details) {
+            if (widget.isEditMode || isInspectorOpen) return;
+            final currentScale = _transformationController.value.getMaxScaleOnAxis();
+            _currentPanOffset += details.focalPointDelta;
+            _currentPanOffset = _clampOffset(_currentPanOffset);
+            _transformationController.value = Matrix4.identity()
+              ..translate(_currentPanOffset.dx, _currentPanOffset.dy)
+              ..scale(currentScale);
+          },
+          onScaleEnd: (details) {
+            if (widget.isEditMode || isInspectorOpen) return;
+            final velocity = details.velocity.pixelsPerSecond;
+            if (velocity.distance < 50.0) return;
+            
+            final targetOffset = Offset(
+              _currentPanOffset.dx + (velocity.dx * 0.2),
+              _currentPanOffset.dy + (velocity.dy * 0.2),
+            );
+            
+            _physicsAnimation = Tween<Offset>(
+              begin: _currentPanOffset,
+              end: targetOffset,
+            ).animate(CurvedAnimation(
+              parent: _physicsController,
+              curve: Curves.easeOutCirc,
+            ));
+            
+            _physicsController.duration = const Duration(milliseconds: 800);
+            _physicsController.forward(from: 0.0);
+          },
+          child: ClipRect(
+            child: SizedBox.expand(
+              child: OverflowBox(
+                alignment: Alignment.topLeft,
+                maxWidth: double.infinity,
+                maxHeight: double.infinity,
+                child: ValueListenableBuilder<Matrix4>(
+                  valueListenable: _transformationController,
+                  builder: (context, matrix, child) {
+                    return Transform(
+                      transform: matrix,
+                      alignment: Alignment.topLeft,
+                      child: child,
+                    );
+                  },
+                  child: GestureDetector(
+                    onTapUp: _processCanvasTap,
+                    child: Container(
+                      width: canvasWidthPixels,
+                      height: canvasHeightPixels,
+                      color: Theme.of(context).scaffoldBackgroundColor,
+                      child: RepaintBoundary(
+                        child: CustomPaint(
+                          painter: _GridPainter(
+                            gridCellSizePixels: gridCellSizePixels,
+                            gridColor: Theme.of(context).dividerColor,
+                          ),
+                          child: Stack(
+                            children: _cachedDeskWidgets ?? [],
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
           ),
-        ),      ),
+        ),
+      ),
     );
   }
 
@@ -967,16 +1061,19 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     final scrollDelta = (scrollEvent as dynamic).scrollDelta;
     if (scrollDelta == null) return;
 
+    _physicsController.stop();
+
     if ((scrollEvent as dynamic).kind == PointerDeviceKind.trackpad) {
       final double dx = -(scrollDelta.dx as num).toDouble();
       final double dy = -(scrollDelta.dy as num).toDouble();
 
-      final Matrix4 baseTransformationMatrix = _accumulatedTargetMatrix ?? _transformationController.value.clone();
-      final double currentScale = baseTransformationMatrix.getMaxScaleOnAxis();
+      final currentScale = _transformationController.value.getMaxScaleOnAxis();
+      _currentPanOffset += Offset(dx, dy);
+      _currentPanOffset = _clampOffset(_currentPanOffset);
 
-      final targetMatrix = baseTransformationMatrix.clone()..translate(dx / currentScale, dy / currentScale);
-      _accumulatedTargetMatrix = targetMatrix;
-      _animateScrollZoomTransformation(_transformationController.value, targetMatrix);
+      _transformationController.value = Matrix4.identity()
+        ..translate(_currentPanOffset.dx, _currentPanOffset.dy)
+        ..scale(currentScale);
       return;
     }
 
@@ -984,25 +1081,20 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     final double scrollDeltaMultiplier = (scrollDeltaVerticalPixels * 0.0015).clamp(-0.2, 0.2);
     final double zoomScaleFactor = 1.0 - scrollDeltaMultiplier;
 
-    final Matrix4 baseTransformationMatrix = _accumulatedTargetMatrix ?? _transformationController.value.clone();
-    final double currentTargetScale = baseTransformationMatrix.getMaxScaleOnAxis();
-    final double accumulatedTargetScale = (currentTargetScale * zoomScaleFactor).clamp(_minimumAllowedScale ?? 0.1, 5.0);
+    final currentScale = _transformationController.value.getMaxScaleOnAxis();
+    final double targetScale = (currentScale * zoomScaleFactor).clamp(_minimumAllowedScale ?? 0.1, 5.0);
 
-    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
-    if (renderBox == null) return;
+    if (currentScale == targetScale) return;
 
-    final pointerPosition = (scrollEvent as dynamic).position;
-    final Offset focalPointPixels = renderBox.globalToLocal(pointerPosition as Offset);
+    final focalPoint = (scrollEvent as dynamic).localPosition as Offset;
+    final scaleRatio = targetScale / currentScale;
+    
+    _currentPanOffset = focalPoint - (focalPoint - _currentPanOffset) * scaleRatio;
+    _currentPanOffset = _clampOffset(_currentPanOffset);
 
-    final targetMatrix = _calculateZoomTransformationMatrix(
-      baseTransformationMatrix,
-      currentTargetScale,
-      accumulatedTargetScale,
-      focalPointPixels,
-    );
-    _accumulatedTargetMatrix = targetMatrix;
-
-    _animateScrollZoomTransformation(_transformationController.value, targetMatrix);
+    _transformationController.value = Matrix4.identity()
+      ..translate(_currentPanOffset.dx, _currentPanOffset.dy)
+      ..scale(targetScale);
   }
 
   /// Calculate zoom matrix
@@ -1024,43 +1116,38 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
       ..scale(targetScale);
   }
 
-  /// Animate scroll zoom
-  void _animateScrollZoomTransformation(Matrix4 startMatrix, Matrix4 endMatrix) {
-    final currentController = _scrollZoomController;
-    if (currentController == null) {
-      final newController = AnimationController(
-        vsync: this,
-        duration: iosScrollZoomAnimationDuration,
-      );
-      _scrollZoomController = newController;
-      _executeScrollZoomAnimation(newController, startMatrix, endMatrix);
-    } else {
-      currentController.stop();
-      _executeScrollZoomAnimation(currentController, startMatrix, endMatrix);
-    }
+  void _animateZoomTo(Matrix4 newTarget) {
+    _targetMatrix = newTarget;
+    
+    _zoomAnimation = Matrix4Tween(
+      begin: _transformationController.value,
+      end: _targetMatrix,
+    ).animate(CurvedAnimation(
+      parent: _zoomAnimationController,
+      curve: Curves.easeOut,
+    ));
+    
+    _zoomAnimationController.forward(from: 0.0);
   }
 
-  void _executeScrollZoomAnimation(AnimationController animationController, Matrix4 startMatrix, Matrix4 endMatrix) {
-    final matrixAnimation = Matrix4Tween(
-      begin: startMatrix,
-      end: endMatrix,
-    ).animate(CurvedAnimation(
-      parent: animationController,
-      curve: Curves.easeOutCubic,
-    ));
-    _scrollZoomAnimation = matrixAnimation;
-
-    matrixAnimation.addListener(() {
-      if (mounted) {
-        _transformationController.value = matrixAnimation.value;
-      }
-    });
-
-    animationController.forward().then((_) {
-      if (mounted && animationController.isCompleted) {
-        _accumulatedTargetMatrix = null;
-      }
-    });
+  Offset _clampOffset(Offset target) {
+    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+    final viewportSize = renderBox?.hasSize == true ? renderBox!.size : MediaQuery.of(context).size;
+    final currentScale = _transformationController.value.getMaxScaleOnAxis();
+    
+    final double scaledWidth = 3200.0 * currentScale;
+    final double scaledHeight = 1700.0 * currentScale;
+    
+    final double minDx = viewportSize.width - scaledWidth - (viewportSize.width / 2);
+    final double maxDx = viewportSize.width / 2;
+    
+    final double minDy = viewportSize.height - scaledHeight - (viewportSize.height / 2);
+    final double maxDy = viewportSize.height / 2;
+    
+    return Offset(
+      target.dx.clamp(min(minDx, maxDx), max(minDx, maxDx)),
+      target.dy.clamp(min(minDy, maxDy), max(minDy, maxDy)),
+    );
   }
 
   /// A pillar

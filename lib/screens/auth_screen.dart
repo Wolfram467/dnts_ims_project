@@ -12,60 +12,35 @@ class AuthScreen extends ConsumerStatefulWidget {
 }
 
 class _AuthScreenState extends ConsumerState<AuthScreen> {
-  final _emailController = TextEditingController();
+  final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
-  
   bool _isLoading = false;
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
-  String? _validateEmail(String? value) {
-    if (value == null || value.isEmpty) {
-      return 'Email is required';
-    }
-    final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
-    if (emailRegex.hasMatch(value) == false) {
-      return 'Enter a valid email address';
-    }
-    return null;
-  }
-
-  String? _validatePassword(String? value) {
-    if (value == null || value.isEmpty) {
-      return 'Password is required';
-    }
-    if (value.length < 6) {
-      return 'Password must be at least 6 characters';
-    }
-    return null;
-  }
-
   Future<void> _handleSubmit() async {
     final formState = _formKey.currentState;
-    if (formState == null) {
-      return;
-    }
-    if (formState.validate() == false) {
-      return;
-    }
-
+    if (formState == null) return;
+    if (formState.validate() == false) return;
     setState(() => _isLoading = true);
-
     try {
       final supabase = Supabase.instance.client;
-
+      final rawId = _usernameController.text.trim().toUpperCase();
+      final supabaseEmail = '$rawId@dnts.local';
       final response = await supabase.auth.signInWithPassword(
-        email: _emailController.text.trim(),
+        email: supabaseEmail,
         password: _passwordController.text,
       );
-
-      if (response.user != null && mounted) {
+      final user = response.user;
+      if (user == null) return;
+      
+      if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (context) => const MainLayout()),
         );
@@ -73,231 +48,183 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     } on AuthException catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(error.message),
-            backgroundColor: Colors.red.shade700,
-            behavior: SnackBarBehavior.floating,
-            width: 400,
-          ),
-        );
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('An error occurred: $error'),
-            backgroundColor: Colors.red.shade700,
-            behavior: SnackBarBehavior.floating,
-            width: 400,
-          ),
+          SnackBar(content: Text(error.message), backgroundColor: Colors.red.shade700)
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _handleForgotPassword() async {
-    final emailAddress = _emailController.text.trim();
-    if (emailAddress.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please enter your email address first'),
-          backgroundColor: Colors.black87,
-          behavior: SnackBarBehavior.floating,
-          width: 400,
+  Widget _buildLoginBox(BuildContext context, bool isCompact) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 400),
+      child: Container(
+        padding: EdgeInsets.all(isCompact ? 20.0 : 32.0),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          border: Border.all(color: Theme.of(context).dividerColor),
         ),
-      );
-      return;
-    }
-
-    setState(() => _isLoading = true);
-
-    try {
-      final supabase = Supabase.instance.client;
-      await supabase.auth.resetPasswordForEmail(emailAddress);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Password reset link sent to your email'),
-            backgroundColor: Colors.black87,
-            behavior: SnackBarBehavior.floating,
-            width: 400,
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'DEPARTMENT OF NETWORK AND TECHNICAL SERVICES',
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.visible,
+                softWrap: false,
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, letterSpacing: 0.5),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Technical Assistants Portal',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w300, letterSpacing: 1.5),
+              ),
+              SizedBox(height: isCompact ? 16 : 32),
+              SizedBox(
+                height: 40,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 280),
+                  child: TextFormField(
+                    controller: _usernameController,
+                    textInputAction: TextInputAction.next,
+                    onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
+                    style: const TextStyle(fontSize: 13),
+                    decoration: const InputDecoration(
+                      labelText: 'Username',
+                      labelStyle: TextStyle(fontSize: 13),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.zero),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12.0, vertical: 0.0),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 40,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 280),
+                  child: TextFormField(
+                    controller: _passwordController,
+                    obscureText: true,
+                    textInputAction: TextInputAction.done,
+                    onFieldSubmitted: (_) => _handleSubmit(),
+                    style: const TextStyle(fontSize: 13),
+                    decoration: const InputDecoration(
+                      labelText: 'Password',
+                      labelStyle: TextStyle(fontSize: 13),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.zero),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12.0, vertical: 0.0),
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(height: isCompact ? 16 : 24),
+              SizedBox(
+                width: 280,
+                height: 40,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _handleSubmit,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.onSurface,
+                    foregroundColor: Theme.of(context).colorScheme.surface,
+                    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                    elevation: 0,
+                  ),
+                  child: _isLoading 
+                    ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2)) 
+                    : const Text('LOGIN', style: TextStyle(letterSpacing: 2.0, fontSize: 12, fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ],
           ),
-        );
-      }
-    } on AuthException catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(error.message),
-            backgroundColor: Colors.red.shade700,
-            behavior: SnackBarBehavior.floating,
-            width: 400,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFooterText(BuildContext context, bool isCompact) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'Built by a Technical Assistant, for Technical Assistants.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: isCompact ? 10 : 11,
+            fontWeight: FontWeight.w400,
+            letterSpacing: 0.5,
+            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
           ),
-        );
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error sending reset link: $error'),
-            backgroundColor: Colors.red.shade700,
-            behavior: SnackBarBehavior.floating,
-            width: 400,
+        ),
+        SizedBox(height: isCompact ? 4 : 8),
+        Text(
+          'Made with Love, Joy, and Hope.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: isCompact ? 12 : 13,
+            fontWeight: FontWeight.w500,
+            letterSpacing: 1.0,
+            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
           ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
+        ),
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final isDarkMode = ref.watch(themeProvider);
-
+    final size = MediaQuery.of(context).size;
+    final bool isCompact = size.height < 500;
+    
     return Scaffold(
       body: Stack(
         children: [
+          // Background/Main Content
+          LayoutBuilder(
+            builder: (context, constraints) {
+              return SingleChildScrollView(
+                physics: const ClampingScrollPhysics(),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: constraints.maxHeight,
+                    minWidth: constraints.maxWidth,
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      24.0, 
+                      isCompact ? 16.0 : 40.0, 
+                      24.0, 
+                      isCompact ? 16.0 : 32.0
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const SizedBox(height: 1), // Top Spacer
+                        
+                        _buildLoginBox(context, isCompact),
+                        
+                        _buildFooterText(context, isCompact),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          
           Positioned(
             top: 24,
             right: 24,
             child: IconButton(
-              icon: Icon(
-                isDarkMode ? Icons.light_mode : Icons.dark_mode,
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
+              icon: Icon(isDarkMode ? Icons.light_mode : Icons.dark_mode),
               onPressed: () => ref.read(themeProvider.notifier).toggleTheme(),
-              tooltip: 'Toggle Theme',
-            ),
-          ),
-          
-          Center(
-            child: Container(
-              width: 400,
-              padding: const EdgeInsets.all(32),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                border: Border.all(color: Theme.of(context).dividerColor, width: 1),
-              ),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      'DNTS IMS',
-                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                            fontWeight: FontWeight.w300,
-                            letterSpacing: 2,
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'TA Gateway',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w300,
-                            letterSpacing: 1,
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 32),
-                    
-                    TextFormField(
-                      controller: _emailController,
-                      validator: _validateEmail,
-                      keyboardType: TextInputType.emailAddress,
-                      decoration: InputDecoration(
-                        labelText: 'Email',
-                        border: OutlineInputBorder(
-                          borderSide: BorderSide(color: Theme.of(context).dividerColor, width: 1),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: Theme.of(context).dividerColor, width: 1),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: Theme.of(context).colorScheme.onSurface, width: 2),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    TextFormField(
-                      controller: _passwordController,
-                      validator: _validatePassword,
-                      obscureText: true,
-                      decoration: InputDecoration(
-                        labelText: 'Password',
-                        border: OutlineInputBorder(
-                          borderSide: BorderSide(color: Theme.of(context).dividerColor, width: 1),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: Theme.of(context).dividerColor, width: 1),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: Theme.of(context).colorScheme.onSurface, width: 2),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    
-                    SizedBox(
-                      height: 48,
-                      child: ElevatedButton(
-                        onPressed: _isLoading ? null : _handleSubmit,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Theme.of(context).colorScheme.onSurface,
-                          foregroundColor: Theme.of(context).colorScheme.surface,
-                          shape: const RoundedRectangleBorder(
-                            borderRadius: BorderRadius.zero,
-                          ),
-                          elevation: 0,
-                        ),
-                        child: _isLoading
-                            ? SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Theme.of(context).colorScheme.surface,
-                                ),
-                              )
-                            : const Text(
-                                'LOGIN',
-                                style: TextStyle(
-                                  letterSpacing: 1.5,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    TextButton(
-                      onPressed: _handleForgotPassword,
-                      style: TextButton.styleFrom(
-                        foregroundColor: Theme.of(context).colorScheme.onSurface,
-                      ),
-                      child: const Text(
-                        'Forgot Password?',
-                        style: TextStyle(
-                          decoration: TextDecoration.underline,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
             ),
           ),
         ],
