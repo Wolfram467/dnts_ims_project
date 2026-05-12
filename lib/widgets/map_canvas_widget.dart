@@ -1,25 +1,23 @@
 import 'dart:math';
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/map_state_provider.dart';
+import '../providers/domain_providers.dart';
 import '../providers/repository_providers.dart';
 import '../models/hardware_component.dart';
 import '../models/workstation_config.dart';
-import '../domain/spatial_manager.dart';
 import '../utils/keyboard_shortcuts.dart';
 import '../services/camera_state_service.dart';
-import 'desk_widget.dart';
 import 'inspector_panel_widget.dart';
 import 'create_component_dialog.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PHASE 8: SPATIAL LOGIC EXTERNALIZATION
-// Data-driven map canvas that renders workstation layouts provided by
-// the SpatialManager.
+// PERFORMANCE OPTIMIZATION: CANVAS ENGINE
+// High-performance map canvas that renders workstation layouts using
+// a unified CustomPainter for "Google Earth" level performance.
 // ═══════════════════════════════════════════════════════════════════════════
 
 class MapCanvasWidget extends ConsumerStatefulWidget {
@@ -39,27 +37,20 @@ class MapCanvasWidget extends ConsumerStatefulWidget {
 class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     with TickerProviderStateMixin {
   // ═══════════════════════════════════════════════════════════════════════════
-  // LOCAL UI STATE (Transient, not in Riverpod)
+  // LOCAL UI STATE
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /// Transformation controller for InteractiveViewer (pan/zoom)
+  /// Transformation controller for pan/zoom
   late final TransformationController _transformationController;
 
-  /// Animation controller for snap-to-desk kinetic motion
+  /// Animation controller for camera transitions
   AnimationController? _snapAnimationController;
-
-  /// Matrix animation for smooth camera transitions
-  Animation<Matrix4>? _snapAnimation;
 
   /// Minimum allowed scale (calculated to fit all labs)
   double? _minimumAllowedScale;
 
   /// Current workstation configurations being rendered
   List<WorkstationConfig> _workstationConfigs = [];
-
-  /// Cached list of desk widgets (generated once, reused on every build)
-  /// PERFORMANCE: Prevents re-mapping configs on every rebuild
-  List<Widget>? _cachedDeskWidgets;
 
   /// Focus node for keyboard shortcuts
   late final FocusNode _keyboardFocusNode;
@@ -70,31 +61,25 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   /// Flag to prevent loading state during initialization
   bool _isInitializing = true;
 
-  /// Zoom animation controller
-  late AnimationController _zoomAnimationController;
-  late Animation<Matrix4> _zoomAnimation;
-
-  /// The target transformation matrix being accumulated during rapid scroll events
-  late Matrix4 _targetMatrix;
-
+  /// Physics controller for kinetic scrolling
   late AnimationController _physicsController;
   Animation<Offset>? _physicsAnimation;
   Offset _currentPanOffset = Offset.zero;
+
+  /// The desk currently being hovered during a drag operation
+  String? _hoveredDeskId;
   
   // ═══════════════════════════════════════════════════════════════════════════
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
 
   static const double gridCellSizePixels = 100.0;
-  static const double panStepPixels = 200.0; // Pixels to pan per arrow key press
+  static const double panStepPixels = 200.0; 
 
-  // iOS-style animation constants
   static const Duration iosQuickAnimationDuration = Duration(milliseconds: 300);
   static const Duration iosStandardAnimationDuration = Duration(milliseconds: 350);
   static const Duration iosSlowAnimationDuration = Duration(milliseconds: 450);
-  static const Duration iosScrollZoomAnimationDuration = Duration(milliseconds: 150); // Faster for scroll
   static const Curve iosEaseOutCurve = Curves.easeOut;
-  static const Curve iosEaseInOutCurve = Curves.easeInOut;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // LIFECYCLE
@@ -105,14 +90,6 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     super.initState();
     _transformationController = TransformationController();
     _transformationController.addListener(_onCameraTransformationChanged);
-    _zoomAnimationController = AnimationController(vsync: this, duration: const Duration(milliseconds: 60));
-
-    _zoomAnimationController.addListener(() {
-      final currentValue = _zoomAnimation.value;
-      // ignore: unnecessary_null_comparison
-      if (currentValue == null) return;
-      _transformationController.value = currentValue;
-    });
 
     _physicsController = AnimationController.unbounded(vsync: this);
     _physicsController.addListener(() {
@@ -125,23 +102,18 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
         ..scale(currentScale);
     });
 
-    // Initialize focus node for keyboard shortcuts
     _keyboardFocusNode = FocusNode();
 
-    // PERFORMANCE: Pre-generate configurations and widgets once
     _updateSpatialLayout();
 
-    // Load saved camera state or fit all labs after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadInitialCameraState();
     });
   }
 
-  /// Updates the spatial layout based on the current facility ID
   void _updateSpatialLayout() {
     final spatialManager = ref.read(spatialManagerProvider);
     _workstationConfigs = spatialManager.getLayoutForFacility(widget.facilityId);
-    _cachedDeskWidgets = _buildDeskWidgetList();
   }
 
   @override
@@ -152,14 +124,12 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     }
   }
 
-  /// Load initial camera state from localStorage or fit all labs
   Future<void> _loadInitialCameraState() async {
     final savedMatrix = await CameraStateService.loadCameraState();
     final savedWorkstationIdentifier = await CameraStateService.loadActiveDeskState();
 
     if (!mounted) return;
 
-    // Calculate minimum scale before interactions
     _calculateGlobalOverviewMatrix();
 
     setState(() {
@@ -167,11 +137,7 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     });
 
     if (savedMatrix != null) {
-      // Restore saved camera position
       _transformationController.value = savedMatrix;
-      print('📂 Restored camera state');
-
-      // If there was an active desk, restore it
       if (savedWorkstationIdentifier != null) {
         final bool hasDesk = _workstationConfigs.any((config) => config.id == savedWorkstationIdentifier);
         if (hasDesk) {
@@ -179,51 +145,17 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
         }
       }
     } else {
-      // No saved state, fit all labs
       _fitAllLabsInView();
     }
   }
 
-  /// Called when camera transformation changes (debounced save)
   void _onCameraTransformationChanged() {
     if (_isInitializing) return;
 
-    // Debounce: only save after 500ms of no changes
     _cameraStateSaveDebounceTimer?.cancel();
     _cameraStateSaveDebounceTimer = Timer(const Duration(milliseconds: 500), () {
       CameraStateService.saveCameraState(_transformationController.value);
     });
-  }
-
-  /// Build the list of desk widgets once
-  List<Widget> _buildDeskWidgetList() {
-    const double horizontalOffsetPixels = 2.0 * gridCellSizePixels; 
-    const double verticalOffsetPixels = 2.0 * gridCellSizePixels;
-
-    return _workstationConfigs.map((config) {
-      final workstationIdentifier = config.id;
-      final dx = config.dx;
-      final dy = config.dy;
-
-      // Adjust position by subtracting offset (shift from col 2, row 2 to 0, 0)
-      final adjustedHorizontalPositionPixels = (dx * gridCellSizePixels) - horizontalOffsetPixels;
-      final adjustedVerticalPositionPixels = (dy * gridCellSizePixels) - verticalOffsetPixels;
-
-      // Render pillars differently
-      if (workstationIdentifier.startsWith('PILLAR_')) {
-        return Positioned(
-          left: adjustedHorizontalPositionPixels,
-          top: adjustedVerticalPositionPixels,
-          child: _buildStructuralPillar(),
-        );
-      }
-
-      return Positioned(
-        left: adjustedHorizontalPositionPixels,
-        top: adjustedVerticalPositionPixels,
-        child: _buildCanvasWorkstation(workstationIdentifier, Offset(dx, dy)),
-      );
-    }).toList();
   }
 
   @override
@@ -231,7 +163,6 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     _transformationController.removeListener(_onCameraTransformationChanged);
     _transformationController.dispose();
     _snapAnimationController?.dispose();
-    _zoomAnimationController.dispose();
     _physicsController.dispose();
     _keyboardFocusNode.dispose();
     _cameraStateSaveDebounceTimer?.cancel();
@@ -239,10 +170,9 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // ZOOM CONSTRAINT LOGIC
+  // CAMERA LOGIC
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /// Calculates the dynamic responsive matrix to perfectly frame the canvas.
   Matrix4 _calculateGlobalOverviewMatrix() {
     Size viewportSize;
     final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
@@ -275,80 +205,51 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
       ..scale(targetScale);
   }
 
-  /// Fit all laboratories in view
   void _fitAllLabsInView() {
     if (!mounted) return;
     _transformationController.value = _calculateGlobalOverviewMatrix();
   }
 
-  /// Zoom in by 20%
   void _zoomIn() {
     if (!mounted) return;
-    
     final currentTransformationMatrix = _transformationController.value.clone();
     final targetTransformationMatrix = currentTransformationMatrix.clone();
     targetTransformationMatrix.scale(1.2);
-    
     _animateCameraTransformation(currentTransformationMatrix, targetTransformationMatrix, iosQuickAnimationDuration);
   }
 
-  /// Zoom out by 20%
   void _zoomOut() {
     if (!mounted) return;
-    
     final currentTransformationMatrix = _transformationController.value.clone();
     final targetTransformationMatrix = currentTransformationMatrix.clone();
     targetTransformationMatrix.scale(0.8);
-    
     _animateCameraTransformation(currentTransformationMatrix, targetTransformationMatrix, iosQuickAnimationDuration);
   }
 
-  /// Animate matrix change
   void _animateCameraTransformation(Matrix4 startMatrix, Matrix4 endMatrix, Duration animationDuration) {
     _snapAnimationController?.dispose();
-    
-    final animationController = AnimationController(
-      vsync: this,
-      duration: animationDuration,
-    );
+    final animationController = AnimationController(vsync: this, duration: animationDuration);
     _snapAnimationController = animationController;
-
-    final curvedAnimation = CurvedAnimation(
-      parent: animationController,
-      curve: iosEaseOutCurve,
-    );
-
-    final matrixAnimation = Matrix4Tween(
-      begin: startMatrix,
-      end: endMatrix,
-    ).animate(curvedAnimation);
-    _snapAnimation = matrixAnimation;
-
+    final curvedAnimation = CurvedAnimation(parent: animationController, curve: iosEaseOutCurve);
+    final matrixAnimation = Matrix4Tween(begin: startMatrix, end: endMatrix).animate(curvedAnimation);
     matrixAnimation.addListener(() {
-      if (mounted) {
-        _transformationController.value = matrixAnimation.value;
-      }
+      if (mounted) _transformationController.value = matrixAnimation.value;
     });
-
     animationController.forward();
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // KEYBOARD SHORTCUTS
+  // INTERACTION LOGIC
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /// Handle keyboard shortcuts
   KeyEventResult _processKeyboardEvent(FocusNode focusNode, KeyEvent keyboardEvent) {
     if (keyboardEvent is! KeyDownEvent) return KeyEventResult.ignored;
-
     final shortcutAction = KeyboardShortcuts.getAction(keyboardEvent);
     if (shortcutAction == null) return KeyEventResult.ignored;
-
     _executeKeyboardShortcut(shortcutAction);
     return KeyEventResult.handled;
   }
 
-  /// Execute keyboard shortcut action
   void _executeKeyboardShortcut(MapShortcutAction shortcutAction) {
     switch (shortcutAction) {
       case MapShortcutAction.closeInspector:
@@ -369,16 +270,13 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
       case MapShortcutAction.zoomIn:
         if (ref.read(inspectorStateProvider)) return;
         _zoomIn();
-        _displayShortcutFeedbackMessage('Zoom In');
         break;
       case MapShortcutAction.zoomOut:
         if (ref.read(inspectorStateProvider)) return;
         _zoomOut();
-        _displayShortcutFeedbackMessage('Zoom Out');
         break;
       case MapShortcutAction.fitAllLabs:
         _fitAllLabsInView();
-        _displayShortcutFeedbackMessage('Fit All Labs');
         break;
       case MapShortcutAction.jumpToLab1:
         _transitionToLaboratory(1);
@@ -413,394 +311,115 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     }
   }
 
-  /// Handle close inspector shortcut
   void _processInspectorCloseRequest() {
     final isInspectorOpen = ref.read(inspectorStateProvider);
     if (isInspectorOpen) {
       resetToGlobalOverview();
-      _displayShortcutFeedbackMessage('Inspector Closed');
     }
   }
 
-  /// Pan camera by delta pixels
   void _panCameraView(double horizontalDeltaPixels, double verticalDeltaPixels) {
-    final isInspectorOpen = ref.read(inspectorStateProvider);
-    if (isInspectorOpen) return;
-
-    if (!mounted) return;
+    if (ref.read(inspectorStateProvider) || !mounted) return;
     final currentTransformationMatrix = _transformationController.value.clone();
     currentTransformationMatrix.translate(horizontalDeltaPixels, verticalDeltaPixels);
     _transformationController.value = currentTransformationMatrix;
   }
 
-  /// Jump to a specific lab
   Future<void> _transitionToLaboratory(int labNumber) async {
     final labPrefix = 'L${labNumber}_D';
     final labConfigs = _workstationConfigs.where((config) => config.id.startsWith(labPrefix)).toList();
+    if (labConfigs.isEmpty) return;
 
-    if (labConfigs.isEmpty) {
-      _displayShortcutFeedbackMessage('Lab $labNumber not found');
-      return;
-    }
+    final minX = labConfigs.map((config) => config.dx).reduce(min);
+    final maxX = labConfigs.map((config) => config.dx).reduce(max);
+    final minY = labConfigs.map((config) => config.dy).reduce(min);
+    final maxY = labConfigs.map((config) => config.dy).reduce(max);
 
-    final minimumColumnNumber = labConfigs.map((config) => config.dx).reduce((a, b) => a < b ? a : b);
-    final maximumColumnNumber = labConfigs.map((config) => config.dx).reduce((a, b) => a > b ? a : b);
-    final minimumRowNumber = labConfigs.map((config) => config.dy).reduce((a, b) => a < b ? a : b);
-    final maximumRowNumber = labConfigs.map((config) => config.dy).reduce((a, b) => a > b ? a : b);
+    Size viewportSize = (context.findRenderObject() as RenderBox?)?.size ?? MediaQuery.of(context).size;
 
-    Size viewportSize;
-    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
-    if (renderBox != null && renderBox.hasSize) {
-      viewportSize = renderBox.size;
-    } else {
-      viewportSize = MediaQuery.of(context).size;
-    }
+    final double contentWidth = (maxX - minX + 1) * gridCellSizePixels;
+    final double contentHeight = (maxY - minY + 1) * gridCellSizePixels;
 
-    final double contentWidthPixels = (maximumColumnNumber - minimumColumnNumber + 1) * gridCellSizePixels;
-    final double contentHeightPixels = (maximumRowNumber - minimumRowNumber + 1) * gridCellSizePixels;
-
-    final double horizontalScaleFactor = (viewportSize.width - 200) / contentWidthPixels;
-    final double verticalScaleFactor = (viewportSize.height - 200) / contentHeightPixels;
-    final double dynamicTargetScale = min(horizontalScaleFactor, verticalScaleFactor).clamp(_minimumAllowedScale ?? 0.1, 5.0);
-
-    final centerColumnNumber = (minimumColumnNumber + maximumColumnNumber + 1) / 2;
-    final centerRowNumber = (minimumRowNumber + maximumRowNumber + 1) / 2;
-
-    await _animateToWorldPosition(centerColumnNumber, centerRowNumber, dynamicTargetScale);
-    _displayShortcutFeedbackMessage('Lab $labNumber');
+    final double targetScale = min((viewportSize.width - 200) / contentWidth, (viewportSize.height - 200) / contentHeight).clamp(_minimumAllowedScale ?? 0.1, 5.0);
+    await _animateToWorldPosition((minX + maxX + 1) / 2, (minY + maxY + 1) / 2, targetScale);
   }
 
-  /// Cycle through desks in current lab
   void _cycleWorkstationInCurrentLaboratory({required bool forward}) {
-    final activeWorkstationIdentifier = ref.read(activeDeskProvider);
-    
-    if (activeWorkstationIdentifier == null) {
-      _displayShortcutFeedbackMessage('No active desk');
-      return;
-    }
-
-    final laboratoryMatch = RegExp(r'L(\d+)_D').firstMatch(activeWorkstationIdentifier);
-    if (laboratoryMatch == null) return;
-
-    final labNumber = int.parse(laboratoryMatch.group(1).toString());
-
-    final labPrefix = 'L${labNumber}_D';
-    final labWorkstationIdentifiers = _workstationConfigs
-        .where((config) => config.id.startsWith(labPrefix))
-        .map((config) => config.id)
-        .toList()
-      ..sort();
-
-    if (labWorkstationIdentifiers.isEmpty) return;
-
-    final currentWorkstationIndex = labWorkstationIdentifiers.indexOf(activeWorkstationIdentifier);
-    if (currentWorkstationIndex == -1) return;
-
-    int nextWorkstationIndex;
-    if (forward) {
-      nextWorkstationIndex = (currentWorkstationIndex + 1) % labWorkstationIdentifiers.length;
-    } else {
-      nextWorkstationIndex = (currentWorkstationIndex - 1 + labWorkstationIdentifiers.length) % labWorkstationIdentifiers.length;
-    }
-
-    final nextWorkstationIdentifier = labWorkstationIdentifiers[nextWorkstationIndex];
-    _loadWorkstationComponents(nextWorkstationIdentifier);
-    _displayShortcutFeedbackMessage(nextWorkstationIdentifier);
+    final activeId = ref.read(activeDeskProvider);
+    if (activeId == null) return;
+    final match = RegExp(r'L(\d+)_D').firstMatch(activeId);
+    if (match == null) return;
+    final labPrefix = 'L${match.group(1)}_D';
+    final labIds = _workstationConfigs.where((config) => config.id.startsWith(labPrefix)).map((config) => config.id).toList()..sort();
+    final currentIndex = labIds.indexOf(activeId);
+    if (currentIndex == -1) return;
+    final nextIndex = forward ? (currentIndex + 1) % labIds.length : (currentIndex - 1 + labIds.length) % labIds.length;
+    _loadWorkstationComponents(labIds[nextIndex]);
   }
 
-  /// Animate camera to a specific position
-  Future<void> _animateToWorldPosition(double columnNumber, double rowNumber, double targetScale) async {
+  Future<void> _animateToWorldPosition(double column, double row, double scale) async {
     if (!mounted) return;
+    Size viewportSize = (context.findRenderObject() as RenderBox?)?.size ?? MediaQuery.of(context).size;
 
-    Size viewportSize;
-    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
-    if (renderBox != null && renderBox.hasSize) {
-      viewportSize = renderBox.size;
-    } else {
-      viewportSize = MediaQuery.of(context).size;
-    }
+    const double offset = 2.0 * gridCellSizePixels;
+    final worldX = (column * gridCellSizePixels) - offset;
+    final worldY = (row * gridCellSizePixels) - offset;
 
-    final screenTargetHorizontalPixels = viewportSize.width * 0.5;
-    final screenTargetVerticalPixels = viewportSize.height * 0.5;
+    final targetMatrix = Matrix4.identity()
+      ..translate((viewportSize.width * 0.5) - (worldX * scale), (viewportSize.height * 0.5) - (worldY * scale))
+      ..scale(scale);
 
-    const double horizontalOffsetPixels = 2.0 * gridCellSizePixels;
-    const double verticalOffsetPixels = 2.0 * gridCellSizePixels;
+    _animateCameraTransformation(_transformationController.value, targetMatrix, iosQuickAnimationDuration);
+  }
 
-    final worldHorizontalPixels = (columnNumber * gridCellSizePixels) - horizontalOffsetPixels;
-    final worldVerticalPixels = (rowNumber * gridCellSizePixels) - verticalOffsetPixels;
+  Future<void> _animateToWorkstationFocus(String deskId) async {
+    final config = _workstationConfigs.firstWhere((c) => c.id == deskId, orElse: () => const WorkstationConfig(id: '', dx: 0, dy: 0));
+    if (config.id.isEmpty || !mounted) return;
 
-    final translationHorizontalPixels = screenTargetHorizontalPixels - (worldHorizontalPixels * targetScale);
-    final translationVerticalPixels = screenTargetVerticalPixels - (worldVerticalPixels * targetScale);
+    Size viewportSize = (context.findRenderObject() as RenderBox?)?.size ?? MediaQuery.of(context).size;
+    final double targetScale = min((viewportSize.width * 0.6 - 200) / gridCellSizePixels, (viewportSize.height - 200) / gridCellSizePixels).clamp(_minimumAllowedScale ?? 0.1, 5.0);
 
-    final targetTransformationMatrix = Matrix4.identity()
-      ..translate(translationHorizontalPixels, translationVerticalPixels)
+    const double offset = 2.0 * gridCellSizePixels;
+    final worldX = ((config.dx + 0.5) * gridCellSizePixels) - offset;
+    final worldY = ((config.dy + 0.5) * gridCellSizePixels) - offset;
+
+    final targetMatrix = Matrix4.identity()
+      ..translate((viewportSize.width * 0.3) - (worldX * targetScale), (viewportSize.height * 0.5) - (worldY * targetScale))
       ..scale(targetScale);
 
-    final currentTransformationMatrix = _transformationController.value.clone();
-
-    _snapAnimationController?.dispose();
-    
-    final animationController = AnimationController(
-      vsync: this,
-      duration: iosQuickAnimationDuration,
-    );
-    _snapAnimationController = animationController;
-
-    final curvedAnimation = CurvedAnimation(
-      parent: animationController,
-      curve: iosEaseOutCurve,
-    );
-
-    final matrixAnimation = Matrix4Tween(
-      begin: currentTransformationMatrix,
-      end: targetTransformationMatrix,
-    ).animate(curvedAnimation);
-    _snapAnimation = matrixAnimation;
-
-    matrixAnimation.addListener(() {
-      if (mounted) {
-        _transformationController.value = matrixAnimation.value;
-      }
-    });
-
-    await animationController.forward();
+    _animateCameraTransformation(_transformationController.value, targetMatrix, iosStandardAnimationDuration);
   }
 
-  /// Show keyboard shortcut feedback
-  void _displayShortcutFeedbackMessage(String feedbackMessage) {
-    if (!mounted) return;
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(feedbackMessage),
-        duration: const Duration(milliseconds: 1200),
-        behavior: SnackBarBehavior.floating,
-        width: 200,
-        backgroundColor: Colors.black87,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-      ),
-    );
-  }
-
-  /// Show keyboard shortcuts help dialog
-  void _displayKeyboardShortcutsDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text(
-          'Keyboard Shortcuts',
-          style: TextStyle(fontWeight: FontWeight.w300, letterSpacing: 1.5),
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildKeyboardShortcutHelpEntry('ESC', 'Close Inspector / Return to Overview'),
-              _buildKeyboardShortcutHelpEntry('Arrow Keys', 'Pan Camera'),
-              _buildKeyboardShortcutHelpEntry('+/-', 'Zoom In/Out'),
-              _buildKeyboardShortcutHelpEntry('Space', 'Fit All Labs'),
-              _buildKeyboardShortcutHelpEntry('1-7', 'Jump to Lab 1-7'),
-              _buildKeyboardShortcutHelpEntry('Tab', 'Next Desk in Lab'),
-              _buildKeyboardShortcutHelpEntry('Shift+Tab', 'Previous Desk in Lab'),
-              _buildKeyboardShortcutHelpEntry('?', 'Show This Help'),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('CLOSE'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildKeyboardShortcutHelpEntry(String keyboardKey, String shortcutDescription) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Container(
-            width: 100,
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.grey.shade200,
-              border: Border.all(color: Colors.black, width: 1),
-            ),
-            child: Text(
-              keyboardKey,
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(shortcutDescription),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // SNAP-TO-INSPECT ANIMATION (Kinetic Motion Engine)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /// Snap-to-Inspect: Animate camera with iOS-style spring physics
-  Future<void> _animateToWorkstationFocus(String workstationIdentifier) async {
-    final workstationConfig = _workstationConfigs.firstWhere(
-      (config) => config.id == workstationIdentifier,
-      orElse: () => const WorkstationConfig(id: '', dx: 0, dy: 0),
-    );
-    
-    if (workstationConfig.id.isEmpty || !mounted) return;
-
-    final dx = workstationConfig.dx;
-    final dy = workstationConfig.dy;
-
-    Size viewportSize;
-    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
-    if (renderBox != null && renderBox.hasSize) {
-      viewportSize = renderBox.size;
-    } else {
-      viewportSize = MediaQuery.of(context).size;
-    }
-
-    final double availableWidthPixels = viewportSize.width * 0.6;
-    final double availableHeightPixels = viewportSize.height;
-
-    const double contentWidthPixels = gridCellSizePixels;
-    const double contentHeightPixels = gridCellSizePixels;
-
-    final double horizontalScaleFactor = (availableWidthPixels - 200) / contentWidthPixels;
-    final double verticalScaleFactor = (availableHeightPixels - 200) / contentHeightPixels;
-    final double dynamicTargetScale = min(horizontalScaleFactor, verticalScaleFactor).clamp(_minimumAllowedScale ?? 0.1, 5.0);
-
-    final screenTargetHorizontalPixels = viewportSize.width * 0.3; 
-    final screenTargetVerticalPixels = viewportSize.height * 0.5;
-
-    const double horizontalOffsetPixels = 2.0 * gridCellSizePixels; 
-    const double verticalOffsetPixels = 2.0 * gridCellSizePixels; 
-
-    final worldHorizontalPixels = ((dx + 0.5) * gridCellSizePixels) - horizontalOffsetPixels;
-    final worldVerticalPixels = ((dy + 0.5) * gridCellSizePixels) - verticalOffsetPixels;
-
-    final translationHorizontalPixels = screenTargetHorizontalPixels - (worldHorizontalPixels * dynamicTargetScale);
-    final translationVerticalPixels = screenTargetVerticalPixels - (worldVerticalPixels * dynamicTargetScale);
-
-    final targetTransformationMatrix = Matrix4.identity()
-      ..translate(translationHorizontalPixels, translationVerticalPixels)
-      ..scale(dynamicTargetScale);
-
-    final currentTransformationMatrix = _transformationController.value.clone();
-
-    _snapAnimationController?.dispose();
-    
-    final animationController = AnimationController(
-      vsync: this,
-      duration: iosStandardAnimationDuration,
-    );
-    _snapAnimationController = animationController;
-
-    final curvedAnimation = CurvedAnimation(
-      parent: animationController,
-      curve: Curves.easeOutCubic,
-    );
-
-    final matrixAnimation = Matrix4Tween(
-      begin: currentTransformationMatrix,
-      end: targetTransformationMatrix,
-    ).animate(curvedAnimation);
-    _snapAnimation = matrixAnimation;
-
-    matrixAnimation.addListener(() {
-      if (mounted) {
-        _transformationController.value = matrixAnimation.value;
-      }
-    });
-
-    await animationController.forward();
-  }
-
-  /// Reset to global overview
   Future<void> resetToGlobalOverview() async {
     if (!mounted) return;
-
     ref.read(inspectorStateProvider.notifier).closeInspector();
     ref.read(activeDeskProvider.notifier).clearActiveDesk();
     ref.read(selectedDeskProvider.notifier).clearSelection();
-
     CameraStateService.clearActiveDeskState();
-
-    final targetTransformationMatrix = _calculateGlobalOverviewMatrix();
-    final currentTransformationMatrix = _transformationController.value.clone();
-
-    _snapAnimationController?.dispose();
-    
-    final animationController = AnimationController(
-      vsync: this,
-      duration: iosSlowAnimationDuration,
-    );
-    _snapAnimationController = animationController;
-
-    final curvedAnimation = CurvedAnimation(
-      parent: animationController,
-      curve: iosEaseInOutCurve,
-    );
-
-    final matrixAnimation = Matrix4Tween(
-      begin: currentTransformationMatrix,
-      end: targetTransformationMatrix,
-    ).animate(curvedAnimation);
-    _snapAnimation = matrixAnimation;
-
-    matrixAnimation.addListener(() {
-      if (mounted) {
-        _transformationController.value = matrixAnimation.value;
-      }
-    });
-
-    await animationController.forward();
+    _animateCameraTransformation(_transformationController.value, _calculateGlobalOverviewMatrix(), iosSlowAnimationDuration);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // DESK INTERACTION HANDLERS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /// Load desk components
-  Future<void> _loadWorkstationComponents(String workstationIdentifier) async {
-    final isPickingMode = ref.read(isLocationPickingModeProvider);
-    if (isPickingMode) {
+  Future<void> _loadWorkstationComponents(String deskId) async {
+    if (ref.read(isLocationPickingModeProvider)) {
       ref.read(isLocationPickingModeProvider.notifier).state = false;
-      showDialog(
-        context: context,
-        builder: (_) => CreateComponentDialog(initialLocation: workstationIdentifier),
-      );
+      showDialog(context: context, builder: (_) => CreateComponentDialog(initialLocation: deskId));
       return;
     }
 
-    print('🖱️ Desk clicked: $workstationIdentifier');
-
-    ref.read(selectedDeskProvider.notifier).selectDesk(workstationIdentifier);
-
+    ref.read(selectedDeskProvider.notifier).selectDesk(deskId);
     Future.delayed(const Duration(milliseconds: 250), () {
-      if (mounted) {
-        ref.read(selectedDeskProvider.notifier).clearSelection();
-      }
+      if (mounted) ref.read(selectedDeskProvider.notifier).clearSelection();
     });
 
-    ref.read(activeDeskProvider.notifier).setActiveDesk(workstationIdentifier);
-    CameraStateService.saveActiveDeskState(workstationIdentifier);
-    await _animateToWorkstationFocus(workstationIdentifier);
+    ref.read(activeDeskProvider.notifier).setActiveDesk(deskId);
+    CameraStateService.saveActiveDeskState(deskId);
+    await _animateToWorkstationFocus(deskId);
 
-    final isMobile = MediaQuery.of(context).size.width < 600;
-    if (isMobile) {
+    if (MediaQuery.of(context).size.width < 600) {
       if (mounted) {
         showModalBottomSheet(
           context: context,
@@ -820,80 +439,124 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     }
   }
 
-  /// Handle component drop
-  Future<void> _handleComponentDrop(
-    HardwareComponent draggedComponent,
-    String targetWorkstationIdentifier,
-  ) async {
-    final sourceWorkstationIdentifier = ref.read(sourceWorkstationProvider);
-    
-    if (sourceWorkstationIdentifier == null || sourceWorkstationIdentifier == targetWorkstationIdentifier) {
+  Future<void> _handleComponentDrop(HardwareComponent component, String deskId) async {
+    final sourceId = ref.read(sourceWorkstationProvider);
+    if (sourceId == null || sourceId == deskId) {
       ref.read(draggingComponentProvider.notifier).clearDragging();
       return;
     }
 
-    final inventoryManager = ref.read(inventoryManagerProvider);
-    final result = await inventoryManager.moveComponent(
-      componentId: draggedComponent.dntsSerial,
-      toWorkstationId: targetWorkstationIdentifier,
+    final result = await ref.read(inventoryManagerProvider).moveComponent(
+      componentId: component.dntsSerial,
+      toWorkstationId: deskId,
     );
 
     result.fold(
       (success) {
-        print('✅ Move successful: ${draggedComponent.dntsSerial} to $targetWorkstationIdentifier');
-        // Refresh local UI state
         ref.read(refreshTriggerProvider.notifier).state++;
-        // If the source or target was the active desk, refresh its components
-        final activeDeskIdentifier = ref.read(activeDeskProvider);
-        if (activeDeskIdentifier != null && (activeDeskIdentifier == sourceWorkstationIdentifier || activeDeskIdentifier == targetWorkstationIdentifier)) {
-          _loadWorkstationComponents(activeDeskIdentifier);
+        final activeId = ref.read(activeDeskProvider);
+        if (activeId != null && (activeId == sourceId || activeId == deskId)) {
+          _loadWorkstationComponents(activeId);
         }
       },
       (failure) {
-        print('❌ Move failed: $failure');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Move failed: $failure')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Move failed: $failure')));
+        }
       },
     );
-
     ref.read(draggingComponentProvider.notifier).clearDragging();
     ref.read(sourceWorkstationProvider.notifier).state = null;
   }
 
-  /// Handle canvas tap in edit mode
-  void _processCanvasTap(TapUpDetails tapDetails) {
+  void _handleCanvasTap(TapUpDetails details, Matrix4 matrix) {
+    if (widget.isEditMode) {
+      _processCanvasTap(details, matrix);
+      return;
+    }
+    final desk = _getDeskAtPosition(details.localPosition, matrix);
+    if (desk != null && !desk.id.startsWith('PILLAR_')) {
+      _loadWorkstationComponents(desk.id);
+    }
+  }
+
+  WorkstationConfig? _getDeskAtPosition(Offset localPosition, Matrix4 matrix) {
+    final invertedMatrix = Matrix4.inverted(matrix);
+    final worldPosition = MatrixUtils.transformPoint(invertedMatrix, localPosition);
+
+    for (final config in _workstationConfigs) {
+      const double offset = 2.0 * gridCellSizePixels;
+      final rect = Rect.fromLTWH(
+        (config.dx * gridCellSizePixels) - offset,
+        (config.dy * gridCellSizePixels) - offset,
+        gridCellSizePixels,
+        gridCellSizePixels,
+      );
+      if (rect.contains(worldPosition)) return config;
+    }
+    return null;
+  }
+
+  void _processCanvasTap(TapUpDetails details, Matrix4 matrix) {
     if (!widget.isEditMode) return;
-    final localTapPosition = tapDetails.localPosition;
-
-    const double horizontalOffsetPixels = 2.0;
-    const double verticalOffsetPixels = 2.0;
-
-    final int gridColumnNumber = (localTapPosition.dx / gridCellSizePixels).floor() + horizontalOffsetPixels.toInt();
-    final int gridRowNumber = (localTapPosition.dy / gridCellSizePixels).floor() + verticalOffsetPixels.toInt();
-    final tapGridCoordinates = Offset(gridColumnNumber.toDouble(), gridRowNumber.toDouble());
-
+    
+    final invertedMatrix = Matrix4.inverted(matrix);
+    final worldPosition = MatrixUtils.transformPoint(invertedMatrix, details.localPosition);
+    
+    final col = (worldPosition.dx / gridCellSizePixels).floor() + 2;
+    final row = (worldPosition.dy / gridCellSizePixels).floor() + 2;
     setState(() {
-      final existingWorkstationIdentifiers = _workstationConfigs
-          .where((config) => config.dx == tapGridCoordinates.dx && config.dy == tapGridCoordinates.dy && !config.id.startsWith('PILLAR_'))
-          .map((config) => config.id)
-          .toList();
-
-      if (existingWorkstationIdentifiers.isNotEmpty) {
-        for (final workstationIdentifier in existingWorkstationIdentifiers) {
-          _workstationConfigs.removeWhere((config) => config.id == workstationIdentifier);
-        }
+      final existing = _workstationConfigs.where((c) => c.dx == col && c.dy == row && !c.id.startsWith('PILLAR_')).toList();
+      if (existing.isNotEmpty) {
+        for (final e in existing) _workstationConfigs.remove(e);
       } else {
-        final customWorkstationIdentifier =
-            'CUSTOM_${(_workstationConfigs.length + 1).toString().padLeft(3, '0')}';
-        _workstationConfigs.add(WorkstationConfig(
-          id: customWorkstationIdentifier,
-          dx: tapGridCoordinates.dx,
-          dy: tapGridCoordinates.dy,
-        ));
+        _workstationConfigs.add(WorkstationConfig(id: 'CUSTOM_${(_workstationConfigs.length + 1).toString().padLeft(3, '0')}', dx: col.toDouble(), dy: row.toDouble()));
       }
-      _cachedDeskWidgets = _buildDeskWidgetList();
     });
+  }
+
+  void _displayKeyboardShortcutsDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Keyboard Shortcuts'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildKeyboardShortcutHelpEntry('ESC', 'Close Inspector / Return to Overview'),
+              _buildKeyboardShortcutHelpEntry('Arrow Keys', 'Pan Camera'),
+              _buildKeyboardShortcutHelpEntry('+/-', 'Zoom In/Out'),
+              _buildKeyboardShortcutHelpEntry('Space', 'Fit All Labs'),
+              _buildKeyboardShortcutHelpEntry('1-7', 'Jump to Lab 1-7'),
+              _buildKeyboardShortcutHelpEntry('Tab', 'Next Desk in Lab'),
+              _buildKeyboardShortcutHelpEntry('Shift+Tab', 'Previous Desk in Lab'),
+              _buildKeyboardShortcutHelpEntry('?', 'Show This Help'),
+            ],
+          ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('CLOSE'))],
+      ),
+    );
+  }
+
+  Widget _buildKeyboardShortcutHelpEntry(String key, String desc) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Container(
+            width: 100,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(color: Colors.grey.shade200, border: Border.all(color: Colors.black)),
+            child: Text(key, style: const TextStyle(fontWeight: FontWeight.w600, fontFamily: 'monospace')),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Text(desc)),
+        ],
+      ),
+    );
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -906,90 +569,55 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
 
     ref.listen<CameraAction?>(cameraControlProvider, (previous, next) {
       if (next == null) return;
-
       switch (next) {
-        case CameraAction.fitAllLabs:
-          _fitAllLabsInView();
-          break;
-        case CameraAction.zoomIn:
-          _zoomIn();
-          break;
-        case CameraAction.zoomOut:
-          _zoomOut();
-          break;
-        case CameraAction.resetToGlobalOverview:
-          resetToGlobalOverview();
-          break;
+        case CameraAction.fitAllLabs: _fitAllLabsInView(); break;
+        case CameraAction.zoomIn: _zoomIn(); break;
+        case CameraAction.zoomOut: _zoomOut(); break;
+        case CameraAction.resetToGlobalOverview: resetToGlobalOverview(); break;
       }
     });
 
     ref.listen<bool>(inspectorStateProvider, (previous, next) {
-      if (previous == true && next == false) {
-        resetToGlobalOverview();
-      }
+      if (previous == true && next == false) resetToGlobalOverview();
     });
 
     return _buildInfiniteCanvasView(isInspectorOpen);
   }
 
-  /// Builds the blueprint-style infinite canvas
   Widget _buildInfiniteCanvasView(bool isInspectorOpen) {
-    const double canvasWidthPixels = 3200.0;
-    const double canvasHeightPixels = 1700.0;
+    const double canvasWidth = 3200.0;
+    const double canvasHeight = 1700.0;
+    final inventory = ref.watch(facilityInventoryProvider).valueOrNull ?? [];
+    final selectedId = ref.watch(selectedDeskProvider);
 
     return Focus(
       focusNode: _keyboardFocusNode,
       onKeyEvent: _processKeyboardEvent,
       autofocus: true,
       child: Listener(
-        onPointerSignal: (pointerSignalEvent) {
+        onPointerSignal: (signal) {
           if (isInspectorOpen) return;
-          try {
-            final scrollDelta = (pointerSignalEvent as dynamic).scrollDelta;
-            if (scrollDelta != null) {
-              _processScrollZoomEvent(pointerSignalEvent);
-            }
-          } catch (exception) {
-            // Not a scroll event
-          }
+          if (signal is PointerScrollEvent) _processScrollZoomEvent(signal);
         },
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onScaleStart: (details) {
+          onScaleStart: (_) {
             _physicsController.stop();
-            final currentMatrix = _transformationController.value;
-            _currentPanOffset = Offset(
-              currentMatrix.getTranslation().x,
-              currentMatrix.getTranslation().y,
-            );
+            final translation = _transformationController.value.getTranslation();
+            _currentPanOffset = Offset(translation.x, translation.y);
           },
           onScaleUpdate: (details) {
             if (widget.isEditMode || isInspectorOpen) return;
-            final currentScale = _transformationController.value.getMaxScaleOnAxis();
+            final scale = _transformationController.value.getMaxScaleOnAxis();
             _currentPanOffset += details.focalPointDelta;
             _currentPanOffset = _clampOffset(_currentPanOffset);
-            _transformationController.value = Matrix4.identity()
-              ..translate(_currentPanOffset.dx, _currentPanOffset.dy)
-              ..scale(currentScale);
+            _transformationController.value = Matrix4.identity()..translate(_currentPanOffset.dx, _currentPanOffset.dy)..scale(scale);
           },
           onScaleEnd: (details) {
             if (widget.isEditMode || isInspectorOpen) return;
             final velocity = details.velocity.pixelsPerSecond;
             if (velocity.distance < 50.0) return;
-            
-            final targetOffset = Offset(
-              _currentPanOffset.dx + (velocity.dx * 0.2),
-              _currentPanOffset.dy + (velocity.dy * 0.2),
-            );
-            
-            _physicsAnimation = Tween<Offset>(
-              begin: _currentPanOffset,
-              end: targetOffset,
-            ).animate(CurvedAnimation(
-              parent: _physicsController,
-              curve: Curves.easeOutCirc,
-            ));
-            
+            _physicsAnimation = Tween<Offset>(begin: _currentPanOffset, end: _currentPanOffset + velocity * 0.2).animate(CurvedAnimation(parent: _physicsController, curve: Curves.easeOutCirc));
             _physicsController.duration = const Duration(milliseconds: 800);
             _physicsController.forward(from: 0.0);
           },
@@ -1001,32 +629,39 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
                 maxHeight: double.infinity,
                 child: ValueListenableBuilder<Matrix4>(
                   valueListenable: _transformationController,
-                  builder: (context, matrix, child) {
-                    return Transform(
-                      transform: matrix,
-                      alignment: Alignment.topLeft,
-                      child: child,
+                  builder: (context, matrix, _) {
+                    return DragTarget<HardwareComponent>(
+                      onWillAcceptWithDetails: (details) => true,
+                      onMove: (details) {
+                        final RenderBox renderBox = context.findRenderObject() as RenderBox;
+                        final localPos = renderBox.globalToLocal(details.offset);
+                        final desk = _getDeskAtPosition(localPos, matrix);
+                        if (desk?.id != _hoveredDeskId) setState(() => _hoveredDeskId = desk?.id);
+                      },
+                      onLeave: (_) => setState(() => _hoveredDeskId = null),
+                      onAcceptWithDetails: (details) {
+                        if (_hoveredDeskId != null) _handleComponentDrop(details.data, _hoveredDeskId!);
+                        setState(() => _hoveredDeskId = null);
+                      },
+                      builder: (context, _, __) {
+                        return GestureDetector(
+                          onTapUp: (details) => _handleCanvasTap(details, matrix),
+                          child: CustomPaint(
+                            size: const Size(canvasWidth, canvasHeight),
+                            painter: LabLayoutPainter(
+                              configs: _workstationConfigs,
+                              inventory: inventory,
+                              selectedDeskId: selectedId,
+                              hoveredDeskId: _hoveredDeskId,
+                              gridCellSizePixels: gridCellSizePixels,
+                              transformMatrix: matrix,
+                              theme: Theme.of(context),
+                            ),
+                          ),
+                        );
+                      },
                     );
                   },
-                  child: GestureDetector(
-                    onTapUp: _processCanvasTap,
-                    child: Container(
-                      width: canvasWidthPixels,
-                      height: canvasHeightPixels,
-                      color: Theme.of(context).scaffoldBackgroundColor,
-                      child: RepaintBoundary(
-                        child: CustomPaint(
-                          painter: _GridPainter(
-                            gridCellSizePixels: gridCellSizePixels,
-                            gridColor: Theme.of(context).dividerColor,
-                          ),
-                          child: Stack(
-                            children: _cachedDeskWidgets ?? [],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
                 ),
               ),
             ),
@@ -1036,183 +671,124 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     );
   }
 
-  /// Handle interaction updates
-  void _processInteractionUpdate(ScaleUpdateDetails interactionDetails) {
-    if (interactionDetails.scale == 1.0) return;
-
-    final Matrix4 currentMatrix = _transformationController.value;
-    final double currentScale = currentMatrix.getMaxScaleOnAxis();
-    final double targetScale = (currentScale * interactionDetails.scale).clamp(_minimumAllowedScale ?? 0.1, 5.0);
-
-    final Matrix4 targetMatrix = _calculateZoomTransformationMatrix(
-      currentMatrix,
-      currentScale,
-      targetScale,
-      interactionDetails.localFocalPoint,
-    );
-
-    _transformationController.value = targetMatrix;
-  }
-
-  /// Handle smooth scroll zoom
-  void _processScrollZoomEvent(dynamic scrollEvent) {
+  void _processScrollZoomEvent(PointerScrollEvent signal) {
     if (!mounted) return;
-
-    final scrollDelta = (scrollEvent as dynamic).scrollDelta;
-    if (scrollDelta == null) return;
-
     _physicsController.stop();
 
-    if ((scrollEvent as dynamic).kind == PointerDeviceKind.trackpad) {
-      final double dx = -(scrollDelta.dx as num).toDouble();
-      final double dy = -(scrollDelta.dy as num).toDouble();
-
-      final currentScale = _transformationController.value.getMaxScaleOnAxis();
-      _currentPanOffset += Offset(dx, dy);
-      _currentPanOffset = _clampOffset(_currentPanOffset);
-
-      _transformationController.value = Matrix4.identity()
-        ..translate(_currentPanOffset.dx, _currentPanOffset.dy)
-        ..scale(currentScale);
+    if (signal.kind == PointerDeviceKind.trackpad) {
+      final scale = _transformationController.value.getMaxScaleOnAxis();
+      _currentPanOffset = _clampOffset(_currentPanOffset - signal.scrollDelta);
+      _transformationController.value = Matrix4.identity()..translate(_currentPanOffset.dx, _currentPanOffset.dy)..scale(scale);
       return;
     }
 
-    final double scrollDeltaVerticalPixels = (scrollDelta.dy as num).toDouble();
-    final double scrollDeltaMultiplier = (scrollDeltaVerticalPixels * 0.0015).clamp(-0.2, 0.2);
-    final double zoomScaleFactor = 1.0 - scrollDeltaMultiplier;
-
+    final double zoomFactor = 1.0 - (signal.scrollDelta.dy * 0.0015).clamp(-0.2, 0.2);
     final currentScale = _transformationController.value.getMaxScaleOnAxis();
-    final double targetScale = (currentScale * zoomScaleFactor).clamp(_minimumAllowedScale ?? 0.1, 5.0);
+    final targetScale = (currentScale * zoomFactor).clamp(_minimumAllowedScale ?? 0.1, 5.0);
 
     if (currentScale == targetScale) return;
 
-    final focalPoint = (scrollEvent as dynamic).localPosition as Offset;
-    final scaleRatio = targetScale / currentScale;
-    
-    _currentPanOffset = focalPoint - (focalPoint - _currentPanOffset) * scaleRatio;
-    _currentPanOffset = _clampOffset(_currentPanOffset);
-
-    _transformationController.value = Matrix4.identity()
-      ..translate(_currentPanOffset.dx, _currentPanOffset.dy)
-      ..scale(targetScale);
-  }
-
-  /// Calculate zoom matrix
-  Matrix4 _calculateZoomTransformationMatrix(
-    Matrix4 currentMatrix,
-    double currentScale,
-    double targetScale,
-    Offset focalPointPixels,
-  ) {
-    final currentTranslationVector = currentMatrix.getTranslation();
-    final worldHorizontalPixels = (focalPointPixels.dx - currentTranslationVector.x) / currentScale;
-    final worldVerticalPixels = (focalPointPixels.dy - currentTranslationVector.y) / currentScale;
-
-    final targetTranslationHorizontalPixels = focalPointPixels.dx - (worldHorizontalPixels * targetScale);
-    final targetTranslationVerticalPixels = focalPointPixels.dy - (worldVerticalPixels * targetScale);
-
-    return Matrix4.identity()
-      ..translate(targetTranslationHorizontalPixels, targetTranslationVerticalPixels)
-      ..scale(targetScale);
-  }
-
-  void _animateZoomTo(Matrix4 newTarget) {
-    _targetMatrix = newTarget;
-    
-    _zoomAnimation = Matrix4Tween(
-      begin: _transformationController.value,
-      end: _targetMatrix,
-    ).animate(CurvedAnimation(
-      parent: _zoomAnimationController,
-      curve: Curves.easeOut,
-    ));
-    
-    _zoomAnimationController.forward(from: 0.0);
+    final focalPoint = signal.localPosition;
+    final ratio = targetScale / currentScale;
+    _currentPanOffset = _clampOffset(focalPoint - (focalPoint - _currentPanOffset) * ratio);
+    _transformationController.value = Matrix4.identity()..translate(_currentPanOffset.dx, _currentPanOffset.dy)..scale(targetScale);
   }
 
   Offset _clampOffset(Offset target) {
-    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
-    final viewportSize = renderBox?.hasSize == true ? renderBox!.size : MediaQuery.of(context).size;
-    final currentScale = _transformationController.value.getMaxScaleOnAxis();
-    
-    final double scaledWidth = 3200.0 * currentScale;
-    final double scaledHeight = 1700.0 * currentScale;
-    
-    final double minDx = viewportSize.width - scaledWidth - (viewportSize.width / 2);
-    final double maxDx = viewportSize.width / 2;
-    
-    final double minDy = viewportSize.height - scaledHeight - (viewportSize.height / 2);
-    final double maxDy = viewportSize.height / 2;
-    
-    return Offset(
-      target.dx.clamp(min(minDx, maxDx), max(minDx, maxDx)),
-      target.dy.clamp(min(minDy, maxDy), max(minDy, maxDy)),
-    );
-  }
-
-  /// A pillar
-  Widget _buildStructuralPillar() {
-    return Container(
-      width: gridCellSizePixels,
-      height: gridCellSizePixels,
-      decoration: BoxDecoration(
-        color: const Color(0xFF6B7280),
-        border: Border.all(color: const Color(0xFFD1D5DB), width: 1),
-      ),
-      child: const Center(
-        child: Icon(
-          Icons.block,
-          color: Color(0xFF9CA3AF),
-          size: 32,
-        ),
-      ),
-    );
-  }
-
-  /// A single desk tile
-  Widget _buildCanvasWorkstation(String workstationIdentifier, Offset position) {
-    return DeskWidget(
-      deskId: workstationIdentifier,
-      position: position,
-      cellSize: gridCellSizePixels,
-      isEditMode: widget.isEditMode,
-      onTap: () => _loadWorkstationComponents(workstationIdentifier),
-      onComponentDrop: (component) => _handleComponentDrop(component, workstationIdentifier),
-    );
+    final RenderBox? box = context.findRenderObject() as RenderBox?;
+    final viewport = box?.size ?? MediaQuery.of(context).size;
+    final scale = _transformationController.value.getMaxScaleOnAxis();
+    final double w = 3200.0 * scale, h = 1700.0 * scale;
+    final double minDx = viewport.width - w - viewport.width / 2, maxDx = viewport.width / 2;
+    final double minDy = viewport.height - h - viewport.height / 2, maxDy = viewport.height / 2;
+    return Offset(target.dx.clamp(min(minDx, maxDx), max(minDx, maxDx)), target.dy.clamp(min(minDy, maxDy), max(minDy, maxDy)));
   }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// GRID PAINTER
+// LAB LAYOUT PAINTER
 // ═══════════════════════════════════════════════════════════════════════════
 
-class _GridPainter extends CustomPainter {
+class LabLayoutPainter extends CustomPainter {
+  final List<WorkstationConfig> configs;
+  final List<Map<String, dynamic>> inventory;
+  final String? selectedDeskId;
+  final String? hoveredDeskId;
   final double gridCellSizePixels;
-  final Color gridColor;
+  final Matrix4 transformMatrix;
+  final ThemeData theme;
 
-  _GridPainter({
+  LabLayoutPainter({
+    required this.configs,
+    required this.inventory,
+    this.selectedDeskId,
+    this.hoveredDeskId,
     required this.gridCellSizePixels,
-    required this.gridColor,
+    required this.transformMatrix,
+    required this.theme,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final gridPaint = Paint()
-      ..color = gridColor
-      ..strokeWidth = 0.5;
+    canvas.save();
+    canvas.transform(transformMatrix.storage);
 
-    for (double horizontalPositionPixels = 0; horizontalPositionPixels <= size.width; horizontalPositionPixels += gridCellSizePixels) {
-      canvas.drawLine(Offset(horizontalPositionPixels, 0), Offset(horizontalPositionPixels, size.height), gridPaint);
+    final scale = transformMatrix.getMaxScaleOnAxis();
+    final translation = transformMatrix.getTranslation();
+    final viewport = Rect.fromLTWH(-translation.x / scale, -translation.y / scale, size.width / scale, size.height / scale);
+
+    _drawGrid(canvas, viewport);
+
+    for (final config in configs) {
+      final rect = Rect.fromLTWH((config.dx * gridCellSizePixels) - 200, (config.dy * gridCellSizePixels) - 200, gridCellSizePixels, gridCellSizePixels);
+      if (!viewport.overlaps(rect)) continue;
+
+      if (config.id.startsWith('PILLAR_')) {
+        _drawPillar(canvas, rect);
+      } else {
+        _drawDesk(canvas, rect, config.id, scale);
+      }
+    }
+    canvas.restore();
+  }
+
+  void _drawGrid(Canvas canvas, Rect viewport) {
+    final paint = Paint()..color = theme.dividerColor..strokeWidth = 0.5;
+    final startX = (viewport.left / gridCellSizePixels).floor() * gridCellSizePixels;
+    final endX = (viewport.right / gridCellSizePixels).ceil() * gridCellSizePixels;
+    final startY = (viewport.top / gridCellSizePixels).floor() * gridCellSizePixels;
+    final endY = (viewport.bottom / gridCellSizePixels).ceil() * gridCellSizePixels;
+
+    for (double x = startX; x <= endX; x += gridCellSizePixels) canvas.drawLine(Offset(x, viewport.top), Offset(x, viewport.bottom), paint);
+    for (double y = startY; y <= endY; y += gridCellSizePixels) canvas.drawLine(Offset(viewport.left, y), Offset(viewport.right, y), paint);
+  }
+
+  void _drawPillar(Canvas canvas, Rect rect) {
+    canvas.drawRect(rect, Paint()..color = const Color(0xFF6B7280));
+    canvas.drawRect(rect, Paint()..color = const Color(0xFFD1D5DB)..style = PaintingStyle.stroke..strokeWidth = 1.0);
+    final iconPaint = Paint()..color = const Color(0xFF9CA3AF)..strokeWidth = 2.0;
+    canvas.drawLine(rect.topLeft + const Offset(20, 20), rect.bottomRight - const Offset(20, 20), iconPaint);
+    canvas.drawLine(rect.topRight + const Offset(-20, 20), rect.bottomLeft - const Offset(-20, 20), iconPaint);
+  }
+
+  void _drawDesk(Canvas canvas, Rect rect, String deskId, double scale) {
+    final isSelected = selectedDeskId == deskId;
+    final isHovered = hoveredDeskId == deskId;
+    
+    canvas.drawRect(rect, Paint()..color = theme.colorScheme.surface);
+    canvas.drawRect(rect, Paint()..color = isSelected || isHovered ? theme.colorScheme.primary : theme.dividerColor..style = PaintingStyle.stroke..strokeWidth = isSelected || isHovered ? 3.0 : 1.0);
+
+    if (inventory.any((asset) => asset['location']?['name'] == deskId)) {
+      canvas.drawCircle(rect.topRight + const Offset(-10, 10), 4, Paint()..color = const Color(0xFF0055FF));
     }
 
-    for (double verticalPositionPixels = 0; verticalPositionPixels <= size.height; verticalPositionPixels += gridCellSizePixels) {
-      canvas.drawLine(Offset(0, verticalPositionPixels), Offset(size.width, verticalPositionPixels), gridPaint);
+    if (scale > 0.4) {
+      final tp = TextPainter(text: TextSpan(text: deskId, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface)), textDirection: TextDirection.ltr);
+      tp.layout();
+      tp.paint(canvas, rect.center - Offset(tp.width / 2, tp.height / 2));
     }
   }
 
   @override
-  bool shouldRepaint(covariant _GridPainter oldDelegate) {
-    return oldDelegate.gridColor != gridColor;
-  }
+  bool shouldRepaint(covariant LabLayoutPainter old) => old.transformMatrix != transformMatrix || old.selectedDeskId != selectedDeskId || old.hoveredDeskId != hoveredDeskId || old.inventory != inventory || old.configs != configs;
 }
-

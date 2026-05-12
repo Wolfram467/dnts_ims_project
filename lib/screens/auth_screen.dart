@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/theme_provider.dart';
@@ -16,6 +17,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   final _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
+  bool _isPasswordVisible = false;
 
   @override
   void dispose() {
@@ -93,6 +95,11 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                     textInputAction: TextInputAction.next,
                     onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
                     style: const TextStyle(fontSize: 13),
+                    inputFormatters: [
+                      TextInputFormatter.withFunction((oldValue, newValue) {
+                        return newValue.copyWith(text: newValue.text.toUpperCase());
+                      }),
+                    ],
                     decoration: const InputDecoration(
                       labelText: 'Username',
                       labelStyle: TextStyle(fontSize: 13),
@@ -109,15 +116,22 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                   constraints: const BoxConstraints(maxWidth: 280),
                   child: TextFormField(
                     controller: _passwordController,
-                    obscureText: true,
+                    obscureText: !_isPasswordVisible,
                     textInputAction: TextInputAction.done,
                     onFieldSubmitted: (_) => _handleSubmit(),
                     style: const TextStyle(fontSize: 13),
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Password',
-                      labelStyle: TextStyle(fontSize: 13),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.zero),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 12.0, vertical: 0.0),
+                      labelStyle: const TextStyle(fontSize: 13),
+                      border: const OutlineInputBorder(borderRadius: BorderRadius.zero),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 0.0),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
+                          size: 18,
+                        ),
+                        onPressed: () => setState(() => _isPasswordVisible = !_isPasswordVisible),
+                      ),
                     ),
                   ),
                 ),

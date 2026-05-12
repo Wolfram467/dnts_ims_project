@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../widgets/admin_dialog.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -8,11 +10,80 @@ class AdminDashboardScreen extends StatefulWidget {
 }
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
-  final List<Map<String, String>> _mockAccounts = [
-    {'id': 'DNTS25-2002573', 'role': 'Admin', 'status': 'Active'},
-    {'id': 'DNTS25-2001184', 'role': 'Technical Assistant', 'status': 'Active'},
-    {'id': 'DNTS25-2003392', 'role': 'Technical Assistant', 'status': 'Offline'},
-  ];
+  List<Map<String, dynamic>> _accounts = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchAccounts();
+  }
+
+  Future<void> _fetchAccounts() async {
+    setState(() => _isLoading = true);
+    try {
+      final response = await Supabase.instance.client
+          .from('profiles')
+          .select('*')
+          .order('created_at', ascending: false);
+      
+      setState(() {
+        _accounts = List<Map<String, dynamic>>.from(response);
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error fetching accounts: $e'), backgroundColor: Colors.red),
+        );
+      }
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _deleteAccount(String id, String email) async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('DELETE ACCOUNT'),
+        content: Text('Are you sure you want to delete account for $email?\nThis will remove their profile record.'),
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('CANCEL'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('DELETE'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      await Supabase.instance.client
+          .from('profiles')
+          .delete()
+          .eq('id', id);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profile deleted successfully')),
+        );
+        _fetchAccounts();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error deleting profile: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,47 +97,50 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           child: Container(color: Theme.of(context).dividerColor, height: 1.0),
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(32.0),
-        children: [
-          Container(
-            decoration: BoxDecoration(
-              border: Border.all(color: Theme.of(context).dividerColor),
-            ),
-            child: DataTable(
-              columns: const [
-                DataColumn(label: Text('DNTS ID')),
-                DataColumn(label: Text('ROLE')),
-                DataColumn(label: Text('STATUS')),
-                DataColumn(label: Text('ACTIONS')),
-              ],
-              rows: _mockAccounts.map((account) {
-                final String id = account['id'] ?? 'Unknown';
-                final String role = account['role'] ?? 'Unknown';
-                final String status = account['status'] ?? 'Unknown';
-                return DataRow(
-                  cells: [
-                    DataCell(Text(id)),
-                    DataCell(Text(role)),
-                    DataCell(Text(status)),
-                    DataCell(
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
-                        onPressed: () {
-                          // Future delete logic goes here
-                        },
-                      ),
-                    ),
+      body: _isLoading 
+        ? const Center(child: CircularProgressIndicator())
+        : ListView(
+            padding: const EdgeInsets.all(32.0),
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  border: Border.all(color: Theme.of(context).dividerColor),
+                ),
+                child: DataTable(
+                  columns: const [
+                    DataColumn(label: Text('DNTS EMAIL')),
+                    DataColumn(label: Text('ROLE')),
+                    DataColumn(label: Text('ACTIONS')),
                   ],
-                );
-              }).toList(),
-            ),
+                  rows: _accounts.map((account) {
+                    final String id = account['id']?.toString() ?? '';
+                    final String email = account['email']?.toString().toUpperCase() ?? 'N/A';
+                    final String role = account['role']?.toString().toUpperCase() ?? 'N/A';
+                    
+                    return DataRow(
+                      cells: [
+                        DataCell(Text(email)),
+                        DataCell(Text(role)),
+                        DataCell(
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                            onPressed: () => _deleteAccount(id, email),
+                          ),
+                        ),
+                      ],
+                    );
+                  }).toList(),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          // Future create account dialog trigger goes here
+        onPressed: () async {
+          await showDialog(
+            context: context,
+            builder: (context) => const AdminDialog(),
+          );
+          _fetchAccounts();
         },
         backgroundColor: Theme.of(context).colorScheme.onSurface,
         foregroundColor: Theme.of(context).colorScheme.surface,

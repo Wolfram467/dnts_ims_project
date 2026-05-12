@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AdminDialog extends StatefulWidget {
@@ -12,6 +13,7 @@ class _AdminDialogState extends State<AdminDialog> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
+  bool _isPasswordVisible = false;
 
   Future<void> _createAccount() async {
     final userText = _usernameController.text.trim();
@@ -65,6 +67,11 @@ class _AdminDialogState extends State<AdminDialog> {
               const SizedBox(height: 32),
               TextField(
                 controller: _usernameController,
+                inputFormatters: [
+                  TextInputFormatter.withFunction((oldValue, newValue) {
+                    return newValue.copyWith(text: newValue.text.toUpperCase());
+                  }),
+                ],
                 decoration: const InputDecoration(
                   labelText: 'Username',
                   border: OutlineInputBorder(borderRadius: BorderRadius.zero),
@@ -73,10 +80,14 @@ class _AdminDialogState extends State<AdminDialog> {
               const SizedBox(height: 16),
               TextField(
                 controller: _passwordController,
-                obscureText: true,
-                decoration: const InputDecoration(
+                obscureText: !_isPasswordVisible,
+                decoration: InputDecoration(
                   labelText: 'Temporary Password',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.zero),
+                  border: const OutlineInputBorder(borderRadius: BorderRadius.zero),
+                  suffixIcon: IconButton(
+                    icon: Icon(_isPasswordVisible ? Icons.visibility : Icons.visibility_off),
+                    onPressed: () => setState(() => _isPasswordVisible = !_isPasswordVisible),
+                  ),
                 ),
               ),
               const SizedBox(height: 32),

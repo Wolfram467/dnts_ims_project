@@ -9,6 +9,7 @@ import 'auth_screen.dart';
 import 'dashboard_screen.dart';
 import 'interactive_map_screen.dart';
 import 'movement_history_screen.dart';
+import 'admin_dashboard_screen.dart';
 
 class MainLayout extends ConsumerStatefulWidget {
   const MainLayout({super.key});
@@ -166,9 +167,8 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
                                     icon: const Icon(Icons.admin_panel_settings_outlined),
                                     tooltip: 'Admin Portal',
                                     onPressed: () {
-                                      showDialog(
-                                        context: context,
-                                        builder: (context) => const AdminDialog(),
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
                                       );
                                     },
                                   ),

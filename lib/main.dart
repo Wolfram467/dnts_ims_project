@@ -1,37 +1,74 @@
+import 'dart:js' as js;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/auth_screen.dart';
-import 'data/lab_data_generator.dart';
-
+import 'screens/bootstrap_screen.dart';
 import 'providers/theme_provider.dart';
 
-Future<void> main() async {
+void main() {
+  // 1. Instant Engine Initialization
   WidgetsFlutterBinding.ensureInitialized();
 
-  await SystemChrome.setPreferredOrientations([
+  // 2. Set UI Orientations (Non-blocking)
+  SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
-  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-
-  await Supabase.initialize(
-    url: 'https://wycbnxuhzemgkfebzfmz.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5Y2JueHVoemVtZ2tmZWJ6Zm16Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5MDE2MzgsImV4cCI6MjA5MjQ3NzYzOH0.Df5rENWQ8_xwd6tNQG4x68sAR_MxZMqb7tsJPDnGoKA',
-  );
-
-  // Initialize the provider container to load theme state before app start
-  final container = ProviderContainer();
-  await container.read(themeProvider.notifier).initializeTheme();
+  // 3. Start Heavy Services in Parallel (Do NOT await here)
+  final initializationFuture = _initializeServices();
 
   runApp(
-    UncontrolledProviderScope(
-      container: container,
-      child: const DNTSApp(),
+    ProviderScope(
+      child: AppInitializer(initFuture: initializationFuture),
     ),
   );
+}
+
+/// Orchestrates the background connection to Supabase and Local Storage
+Future<void> _initializeServices() async {
+  await Future.wait([
+    Supabase.initialize(
+      url: 'https://wycbnxuhzemgkfebzfmz.supabase.co',
+      anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5Y2JueHVoemVtZ2tmZWJ6Zm16Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5MDE2MzgsImV4cCI6MjA5MjQ3NzYzOH0.Df5rENWQ8_xwd6tNQG4x68sAR_MxZMqb7tsJPDnGoKA',
+    ),
+  ]);
+}
+
+/// ═══════════════════════════════════════════════════════════════════════════
+/// APP INITIALIZER
+/// The bridge between the Bootstrap Screen (FCP) and the main Application.
+/// ═══════════════════════════════════════════════════════════════════════════
+class AppInitializer extends ConsumerWidget {
+  final Future<void> initFuture;
+  const AppInitializer({super.key, required this.initFuture});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return FutureBuilder(
+      future: Future.wait([
+        initFuture,
+        ref.read(themeProvider.notifier).initializeTheme(),
+      ]),
+      builder: (context, snapshot) {
+        // Once services are ready, transition to the full app
+        if (snapshot.connectionState == ConnectionState.done) {
+          // Trigger the native HTML splash removal
+          js.context.callMethod('removeDNTSSplash');
+          return const DNTSApp();
+        }
+
+        // Otherwise, keep the DNTS Identity visible (Sub-second FCP)
+        return const MaterialApp(
+          debugShowCheckedModeBanner: false,
+          home: BootstrapScreen(),
+        );
+      },
+    );
+  }
 }
 
 class DNTSApp extends ConsumerWidget {

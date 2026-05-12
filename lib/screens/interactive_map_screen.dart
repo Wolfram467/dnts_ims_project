@@ -8,6 +8,7 @@ import '../widgets/map_canvas_widget.dart';
 import '../widgets/inspector_panel_widget.dart';
 import '../widgets/inventory_dock_widget.dart';
 import '../widgets/create_component_dialog.dart';
+import '../widgets/global_drag_ghost_overlay.dart';
 import '../services/pdf_report_service.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -40,8 +41,9 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final activeDraggingComponent = ref.watch(draggingComponentProvider);
-    final currentDragPositionOffset = ref.watch(dragPositionProvider);
+    // PERFORMANCE: These providers are only watched here because they change rarely.
+    // We EXPLICITLY do NOT watch dragPositionProvider or draggingComponentProvider here
+    // to prevent full-screen rebuilds during drag operations.
     final selectedFacility = ref.watch(selectedFacilityProvider);
 
     return Scaffold(
@@ -56,8 +58,8 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
                 children: [
                   MapCanvasWidget(facilityId: selectedFacility),
                   const InspectorPanelWidget(),
-                  if (activeDraggingComponent != null)
-                    _buildDraggableGhostOverlay(activeDraggingComponent, currentDragPositionOffset),
+                  // PERFORMANCE: Ghost overlay is its own widget to isolate rebuilds
+                  const GlobalDragGhostOverlay(),
                   const InventoryDockWidget(),
                 ],
               ),
@@ -181,35 +183,6 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
     widgetRef.read(inspectorStateProvider.notifier).closeInspector();
     widgetRef.read(activeDeskProvider.notifier).clearActiveDesk();
     widgetRef.read(selectedDeskProvider.notifier).clearSelection();
-  }
-
-  Widget _buildDraggableGhostOverlay(HardwareComponent component, Offset positionOffset) {
-    return RepaintBoundary(
-      child: Positioned(
-        left: positionOffset.dx - 60,
-        top: positionOffset.dy - 30,
-        child: IgnorePointer(
-          child: Material(
-            elevation: 8,
-            shadowColor: Colors.black.withOpacity(0.5),
-            child: Container(
-              width: 120,
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: Colors.blue.shade100, border: Border.all(color: Colors.blue.shade700, width: 2)),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(component.category, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.black), maxLines: 1, overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 4),
-                  Text(component.dntsSerial, style: const TextStyle(fontSize: 9, color: Colors.black87), maxLines: 1, overflow: TextOverflow.ellipsis),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
   }
 
   void _displayKeyboardShortcutsDialog(BuildContext context) {
