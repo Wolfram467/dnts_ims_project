@@ -65,33 +65,6 @@ class _AppInitializerState extends ConsumerState<AppInitializer> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder(
-      future: _initializationSequence,
-      builder: (context, snapshot) {
-        // Once services are ready, transition to the full app
-        if (snapshot.connectionState == ConnectionState.done) {
-          // Trigger the native HTML splash removal after the first frame
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            js.context.callMethod('removeDNTSSplash');
-          });
-          return const DNTSApp();
-        }
-
-        // Otherwise, keep the DNTS Identity visible (Sub-second FCP)
-        return const MaterialApp(
-          debugShowCheckedModeBanner: false,
-          home: BootstrapScreen(),
-        );
-      },
-    );
-  }
-}
-
-class DNTSApp extends ConsumerWidget {
-  const DNTSApp({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
     final isDarkMode = ref.watch(themeProvider);
 
     return MaterialApp(
@@ -114,7 +87,24 @@ class DNTSApp extends ConsumerWidget {
           onSurface: Colors.white,
         ),
       ),
-      home: const AuthScreen(),
+      home: FutureBuilder(
+        future: _initializationSequence,
+        builder: (context, snapshot) {
+          // Once services are ready, transition to the full app
+          if (snapshot.connectionState == ConnectionState.done) {
+            // Trigger the native HTML splash removal after the first frame
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              js.context.callMethod('removeDNTSSplash');
+            });
+            return const AuthScreen();
+          }
+
+          // Otherwise, keep the DNTS Identity visible (Sub-second FCP)
+          return const BootstrapScreen();
+        },
+      ),
     );
   }
 }
+
+// DNTSApp class is no longer needed as it's merged into AppInitializer for performance

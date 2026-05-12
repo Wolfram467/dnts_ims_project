@@ -18,8 +18,10 @@ class BootstrapScreen extends StatelessWidget {
         children: [
           // 1. Technical Dot-Grid Background
           const Positioned.fill(
-            child: CustomPaint(
-              painter: _DotGridPainter(),
+            child: RepaintBoundary(
+              child: CustomPaint(
+                painter: _DotGridPainter(),
+              ),
             ),
           ),
           
