@@ -393,16 +393,37 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     final config = _workstationConfigs.firstWhere((c) => c.id == deskId, orElse: () => const WorkstationConfig(id: '', dx: 0, dy: 0));
     if (config.id.isEmpty || !mounted) return;
 
-    Size viewportSize = (context.findRenderObject() as RenderBox?)?.size ?? MediaQuery.of(context).size;
-    final double targetScale = min((viewportSize.width * 0.6 - 200) / gridCellSizePixels, (viewportSize.height - 200) / gridCellSizePixels).clamp(_minimumAllowedScale ?? 0.1, 5.0);
+    // ═══════════════════════════════════════════════════════════════════════════
+    // VIEWPORT-AWARE CENTERING (CRITICAL FOR CALIBRATION)
+    // We MUST use the actual widget size (RenderBox) rather than Screen size
+    // to account for Navigation Rails, App Bars, and Docks.
+    // ═══════════════════════════════════════════════════════════════════════════
+    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+    final Size widgetSize = renderBox?.size ?? MediaQuery.sizeOf(context);
+    final isCompact = widgetSize.width < 1100;
+    
+    // Target Proportions based on User Calibration (842x355 Viewport)
+    // User requested Scale: 2.0847, TransX: 134.49, TransY: 71.07 for Desk (50, 50)
+    // targetXFactor = (134.49 + (50 * 2.0847)) / 842 ≈ 0.2835
+    // targetYFactor = (71.07 + (50 * 2.0847)) / 355 ≈ 0.4938
+    final double targetXFactor = isCompact ? 0.2835 : 0.30;
+    final double targetYFactor = isCompact ? 0.4938 : 0.50;
+    
+    // Scale: 2.0847 for 355px widget height. 
+    // We target ~58.7% of the widget height for the desk grid cell.
+    final double targetScale = isCompact 
+        ? (widgetSize.height * 0.5872) / gridCellSizePixels
+        : min((widgetSize.width * 0.6 - 200) / gridCellSizePixels, (widgetSize.height - 200) / gridCellSizePixels);
+    
+    final clampedScale = targetScale.clamp(_minimumAllowedScale ?? 0.1, 10.0);
 
     const double offset = 2.0 * gridCellSizePixels;
     final worldX = ((config.dx + 0.5) * gridCellSizePixels) - offset;
     final worldY = ((config.dy + 0.5) * gridCellSizePixels) - offset;
 
     final targetMatrix = Matrix4.identity()
-      ..translate((viewportSize.width * 0.3) - (worldX * targetScale), (viewportSize.height * 0.5) - (worldY * targetScale))
-      ..scale(targetScale);
+      ..translate((widgetSize.width * targetXFactor) - (worldX * clampedScale), (widgetSize.height * targetYFactor) - (worldY * clampedScale))
+      ..scale(clampedScale);
 
     _animateCameraTransformation(_transformationController.value, targetMatrix, iosStandardAnimationDuration);
   }
@@ -598,47 +619,7 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
       if (previous == true && next == false) resetToGlobalOverview();
     });
 
-    return Stack(
-      children: [
-        _buildInfiniteCanvasView(isInspectorOpen),
-        // TEMPORARY TOOL: Copy Camera Position (Moved to LEFT for Mobile Calibration)
-        Positioned(
-          top: 16,
-          left: 16,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              FloatingActionButton.extended(
-                onPressed: () {
-                  final matrix = _transformationController.value;
-                  final scale = matrix.getMaxScaleOnAxis();
-                  final translation = matrix.getTranslation();
-                  final size = MediaQuery.sizeOf(context);
-                  final textToCopy = 'Viewport: ${size.width}x${size.height}, Scale: $scale, TransX: ${translation.x}, TransY: ${translation.y}';
-                  Clipboard.setData(ClipboardData(text: textToCopy));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Copied: $textToCopy')),
-                  );
-                },
-                icon: const Icon(Icons.content_copy),
-                label: const Text('Copy Camera Pos'),
-                backgroundColor: Colors.redAccent,
-              ),
-              const SizedBox(height: 8),
-              FloatingActionButton.extended(
-                onPressed: () async {
-                  await CameraStateService.clearCameraState();
-                  resetToGlobalOverview();
-                },
-                icon: const Icon(Icons.refresh),
-                label: const Text('Force Reset Default'),
-                backgroundColor: Colors.orangeAccent,
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
+    return _buildInfiniteCanvasView(isInspectorOpen);
   }
 
   Widget _buildInfiniteCanvasView(bool isInspectorOpen) {
