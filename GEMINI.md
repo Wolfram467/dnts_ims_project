@@ -29,4 +29,22 @@ When generating, editing, or refactoring code for the DNTS Inventory Management 
 - **Eliminate 'Utils' and 'Helper' Classes:** Do not group code into generic "Utility" or "Helper" files. If functions do not fit into an existing class, create a dedicated domain-specific class or extension.
   - *Bad:* `FormatUtils`, `MapHelpers`
   - *Good:* `DateFormatter`, `CoordinateCalculator`
+
+## 7. Unified Status Light Standards
+- **Component Lights (Inspector):**
+  - 🟢 **Green:** Deployed / Functional (includes a subtle glow).
+  - 🟡 **Yellow:** Under Maintenance.
+  - ⚪ **Gray:** Empty Slot / Not Found.
+- **Workstation Health (Map):**
+  - 🔴 **Red:** Incomplete (one or more of the 6 core components missing).
+  - 🟡 **Yellow:** Maintenance (all present, but some need repair).
+  - 🟢 **Green:** Optimal (all 6 core components present and functional).
+
+## 8. Lab TA Audit Workflow (Digital Twin)
+- **Goal:** Provide a real-time digital replica of the physical laboratory.
+- **Mobile Entry (Samsung A05):**
+  - Use **Holistic Proportional Scaling** (Fixed, non-scrollable UI based on an 800px reference height).
+  - **Auto-Sticker Logic:** DNTS Serial numbers should pre-fill based on `Location` + `Component Type` abbreviations (e.g., `L6-D01-MON`).
+  - **Data Entry Order:** Type -> Brand -> Manufacturer Serial -> Acquisition Date (looked up from static Excel).
+  - **Context Persistence:** Use "Save & Add Another" to keep the location context while populating a workstation.
   

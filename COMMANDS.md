@@ -208,10 +208,42 @@ git diff
 git log --oneline
 ```
 
-## Performance Profiling
+## Performance Profiling & Lighthouse
+
+To get accurate performance metrics (like Lighthouse scores), **you must test against a release build**. Debug builds (like `flutter run -d chrome`) include massive unminified JavaScript bundles (~135MB) for debugging, which will severely fail Lighthouse tests.
+
+There are two "peak" performance build targets for Flutter Web:
+
+### 1. The Standard JS Build (CanvasKit) - Recommended
+This is the default production build. It compiles Dart to highly optimized JavaScript. It has the fastest First Contentful Paint (FCP) due to V8 engine optimizations and does not require complex server headers.
+```bash
+# Build the optimized web release (with source maps for Lighthouse)
+flutter build web --source-maps
+```
+
+### 2. The WebAssembly Build (Wasm)
+This builds to bleeding-edge WebAssembly. It offers the most stable framerates (no garbage collection) but requires a modern browser and strict Cross-Origin Isolation headers on your server.
+```bash
+# Build the Wasm release
+flutter build web --wasm --source-maps
+```
+
+### Serving the Build Locally
+Once built, you must serve the files using a local web server that supports proper routing and (if using Wasm) CORS headers.
+```bash
+cd build/web
+
+# Standard JS serve:
+npx serve
+
+# Wasm serve (requires isolation headers for SharedArrayBuffer):
+npx serve --cors
+```
+
+Run Lighthouse against the local server address (usually `http://localhost:3000`).
 
 ```bash
-# Run with performance overlay
+# Run with performance overlay (for UI jank testing)
 flutter run -d chrome --profile
 
 # Open DevTools

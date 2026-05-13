@@ -1,4 +1,5 @@
-import 'dart:js' as js;
+import 'dart:js_interop';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +7,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/auth_screen.dart';
 import 'screens/bootstrap_screen.dart';
 import 'providers/theme_provider.dart';
+
+@JS('removeDNTSSplash')
+external void removeDNTSSplash();
 
 void main() {
   // 1. Instant Engine Initialization
@@ -57,7 +61,9 @@ class AppInitializer extends ConsumerWidget {
         // Once services are ready, transition to the full app
         if (snapshot.connectionState == ConnectionState.done) {
           // Trigger the native HTML splash removal
-          js.context.callMethod('removeDNTSSplash');
+          if (kIsWeb) {
+            removeDNTSSplash();
+          }
           return const DNTSApp();
         }
 

@@ -20,6 +20,32 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   bool _isPasswordVisible = false;
 
   @override
+  void initState() {
+    super.initState();
+    // Check for existing session or bypass on start
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkExistingSession();
+    });
+  }
+
+  void _checkExistingSession() {
+    final supabase = Supabase.instance.client;
+    final session = supabase.auth.currentSession;
+    
+    if (session != null) {
+      _navigateToMain();
+    }
+  }
+
+  void _navigateToMain() {
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const MainLayout()),
+      );
+    }
+  }
+
+  @override
   void dispose() {
     _usernameController.dispose();
     _passwordController.dispose();
@@ -42,11 +68,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       final user = response.user;
       if (user == null) return;
       
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const MainLayout()),
-        );
-      }
+      _navigateToMain();
     } on AuthException catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

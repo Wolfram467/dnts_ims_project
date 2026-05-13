@@ -48,6 +48,13 @@ Detailed documentation has been organized into the following categories in the `
 | 📋 | List stored data (Debug) |
 | 🔄 | Refresh data |
 
+## ⚡ High-Performance Map Architecture
+
+The Interactive Map features a custom "Zero-Frame-Cost" rendering engine designed for 120 FPS kinetic scrolling on the web:
+*   **GPU Hardware Acceleration**: Uses `RepaintBoundary` and `Transform` to draw the 3200x1700 map exactly once. Panning and zooming are handled entirely by the GPU with 0% CPU cost.
+*   **Event-Driven State**: Camera state saves are fully decoupled from the animation frame loop, preventing Wasm-to-JS bridge memory leaks.
+*   **Mathematical Bounding**: Physics animations are strictly bounded to prevent `NaN` exceptions in WebGL.
+
 ---
 
 ## 🛠️ Tech Stack

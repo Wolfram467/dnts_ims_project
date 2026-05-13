@@ -65,9 +65,13 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   late AnimationController _physicsController;
   Animation<Offset>? _physicsAnimation;
   Offset _currentPanOffset = Offset.zero;
+  double _baseScale = 1.0;
 
   /// The desk currently being hovered during a drag operation
   String? _hoveredDeskId;
+  
+  /// Cached viewport size for physics calculations to prevent layout thrashing
+  Size _viewportSize = const Size(1920, 1080);
   
   // ═══════════════════════════════════════════════════════════════════════════
   // CONSTANTS
@@ -89,9 +93,8 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   void initState() {
     super.initState();
     _transformationController = TransformationController();
-    _transformationController.addListener(_onCameraTransformationChanged);
 
-    _physicsController = AnimationController.unbounded(vsync: this);
+    _physicsController = AnimationController(vsync: this);
     _physicsController.addListener(() {
       final animValue = _physicsAnimation?.value;
       if (animValue == null) return;
@@ -100,6 +103,12 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
       _transformationController.value = Matrix4.identity()
         ..translate(_currentPanOffset.dx, _currentPanOffset.dy)
         ..scale(currentScale);
+    });
+    
+    _physicsController.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        CameraStateService.saveCameraState(_transformationController.value);
+      }
     });
 
     _keyboardFocusNode = FocusNode();
@@ -149,23 +158,12 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     }
   }
 
-  void _onCameraTransformationChanged() {
-    if (_isInitializing) return;
-
-    _cameraStateSaveDebounceTimer?.cancel();
-    _cameraStateSaveDebounceTimer = Timer(const Duration(milliseconds: 500), () {
-      CameraStateService.saveCameraState(_transformationController.value);
-    });
-  }
-
   @override
   void dispose() {
-    _transformationController.removeListener(_onCameraTransformationChanged);
     _transformationController.dispose();
     _snapAnimationController?.dispose();
     _physicsController.dispose();
     _keyboardFocusNode.dispose();
-    _cameraStateSaveDebounceTimer?.cancel();
     super.dispose();
   }
 
@@ -179,9 +177,23 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     if (renderBox != null && renderBox.hasSize) {
       viewportSize = renderBox.size;
     } else {
-      viewportSize = MediaQuery.of(context).size;
+      viewportSize = MediaQuery.sizeOf(context);
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // UNIVERSAL MOBILE BASELINE
+    // Hardcoded to user's exact preferred framing for 915x412 (Landscape)
+    // ═══════════════════════════════════════════════════════════════════════════
+    if (viewportSize.width < 1100) {
+      const double userScale = 0.19405641180156474;
+      _minimumAllowedScale = userScale;
+
+      return Matrix4.identity()
+        ..translate(93.14321973125783, 14.38255302580356)
+        ..scale(userScale);
+    }
+
+    // DESKTOP DEFAULT VIEW
     const double canvasWidthPixels = 3200.0;
     const double canvasHeightPixels = 1700.0;
 
@@ -234,6 +246,11 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     final matrixAnimation = Matrix4Tween(begin: startMatrix, end: endMatrix).animate(curvedAnimation);
     matrixAnimation.addListener(() {
       if (mounted) _transformationController.value = matrixAnimation.value;
+    });
+    animationController.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        CameraStateService.saveCameraState(_transformationController.value);
+      }
     });
     animationController.forward();
   }
@@ -581,7 +598,47 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
       if (previous == true && next == false) resetToGlobalOverview();
     });
 
-    return _buildInfiniteCanvasView(isInspectorOpen);
+    return Stack(
+      children: [
+        _buildInfiniteCanvasView(isInspectorOpen),
+        // TEMPORARY TOOL: Copy Camera Position (Moved to LEFT for Mobile Calibration)
+        Positioned(
+          top: 16,
+          left: 16,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              FloatingActionButton.extended(
+                onPressed: () {
+                  final matrix = _transformationController.value;
+                  final scale = matrix.getMaxScaleOnAxis();
+                  final translation = matrix.getTranslation();
+                  final size = MediaQuery.sizeOf(context);
+                  final textToCopy = 'Viewport: ${size.width}x${size.height}, Scale: $scale, TransX: ${translation.x}, TransY: ${translation.y}';
+                  Clipboard.setData(ClipboardData(text: textToCopy));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Copied: $textToCopy')),
+                  );
+                },
+                icon: const Icon(Icons.content_copy),
+                label: const Text('Copy Camera Pos'),
+                backgroundColor: Colors.redAccent,
+              ),
+              const SizedBox(height: 8),
+              FloatingActionButton.extended(
+                onPressed: () async {
+                  await CameraStateService.clearCameraState();
+                  resetToGlobalOverview();
+                },
+                icon: const Icon(Icons.refresh),
+                label: const Text('Force Reset Default'),
+                backgroundColor: Colors.orangeAccent,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildInfiniteCanvasView(bool isInspectorOpen) {
@@ -589,6 +646,9 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     const double canvasHeight = 1700.0;
     final inventory = ref.watch(facilityInventoryProvider).valueOrNull ?? [];
     final selectedId = ref.watch(selectedDeskProvider);
+    final activeId = ref.watch(activeDeskProvider);
+
+    _viewportSize = MediaQuery.sizeOf(context);
 
     return Focus(
       focusNode: _keyboardFocusNode,
@@ -596,27 +656,44 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
       autofocus: true,
       child: Listener(
         onPointerSignal: (signal) {
-          if (isInspectorOpen) return;
+          // TEMPORARY: Allow movement even if inspector is open for calibration
           if (signal is PointerScrollEvent) _processScrollZoomEvent(signal);
         },
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onScaleStart: (_) {
+          onScaleStart: (details) {
             _physicsController.stop();
             final translation = _transformationController.value.getTranslation();
             _currentPanOffset = Offset(translation.x, translation.y);
+            _baseScale = _transformationController.value.getMaxScaleOnAxis();
           },
           onScaleUpdate: (details) {
-            if (widget.isEditMode || isInspectorOpen) return;
-            final scale = _transformationController.value.getMaxScaleOnAxis();
+            if (widget.isEditMode) return; // Still block in edit mode
+            
+            // TEMPORARY: Remove zoom restriction when a desk is being inspected (activeId != null)
+            // to allow for manual framing calibration.
+            final minScale = activeId != null ? 0.05 : (_minimumAllowedScale ?? 0.1);
+            final targetScale = (_baseScale * details.scale).clamp(minScale, 5.0);
+            
             _currentPanOffset += details.focalPointDelta;
+            
+            final currentScale = _transformationController.value.getMaxScaleOnAxis();
+            if (currentScale != targetScale) {
+              final focalPoint = details.localFocalPoint;
+              final ratio = targetScale / currentScale;
+              _currentPanOffset = focalPoint - (focalPoint - _currentPanOffset) * ratio;
+            }
+            
             _currentPanOffset = _clampOffset(_currentPanOffset);
-            _transformationController.value = Matrix4.identity()..translate(_currentPanOffset.dx, _currentPanOffset.dy)..scale(scale);
+            _transformationController.value = Matrix4.identity()..translate(_currentPanOffset.dx, _currentPanOffset.dy)..scale(targetScale);
           },
           onScaleEnd: (details) {
-            if (widget.isEditMode || isInspectorOpen) return;
+            if (widget.isEditMode) return; // Still block in edit mode
             final velocity = details.velocity.pixelsPerSecond;
-            if (velocity.distance < 50.0) return;
+            if (velocity.distance < 50.0) {
+              CameraStateService.saveCameraState(_transformationController.value);
+              return;
+            }
             _physicsAnimation = Tween<Offset>(begin: _currentPanOffset, end: _currentPanOffset + velocity * 0.2).animate(CurvedAnimation(parent: _physicsController, curve: Curves.easeOutCirc));
             _physicsController.duration = const Duration(milliseconds: 800);
             _physicsController.forward(from: 0.0);
@@ -627,25 +704,32 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
                 alignment: Alignment.topLeft,
                 maxWidth: double.infinity,
                 maxHeight: double.infinity,
-                child: ValueListenableBuilder<Matrix4>(
-                  valueListenable: _transformationController,
-                  builder: (context, matrix, _) {
-                    return DragTarget<HardwareComponent>(
-                      onWillAcceptWithDetails: (details) => true,
-                      onMove: (details) {
-                        final RenderBox renderBox = context.findRenderObject() as RenderBox;
-                        final localPos = renderBox.globalToLocal(details.offset);
-                        final desk = _getDeskAtPosition(localPos, matrix);
-                        if (desk?.id != _hoveredDeskId) setState(() => _hoveredDeskId = desk?.id);
-                      },
-                      onLeave: (_) => setState(() => _hoveredDeskId = null),
-                      onAcceptWithDetails: (details) {
-                        if (_hoveredDeskId != null) _handleComponentDrop(details.data, _hoveredDeskId!);
-                        setState(() => _hoveredDeskId = null);
-                      },
-                      builder: (context, _, __) {
-                        return GestureDetector(
-                          onTapUp: (details) => _handleCanvasTap(details, matrix),
+                child: DragTarget<HardwareComponent>(
+                  onWillAcceptWithDetails: (details) => true,
+                  onMove: (details) {
+                    final RenderBox renderBox = context.findRenderObject() as RenderBox;
+                    final localPos = renderBox.globalToLocal(details.offset);
+                    final matrix = _transformationController.value;
+                    final desk = _getDeskAtPosition(localPos, matrix);
+                    if (desk?.id != _hoveredDeskId) setState(() => _hoveredDeskId = desk?.id);
+                  },
+                  onLeave: (_) => setState(() => _hoveredDeskId = null),
+                  onAcceptWithDetails: (details) {
+                    if (_hoveredDeskId != null) _handleComponentDrop(details.data, _hoveredDeskId!);
+                    setState(() => _hoveredDeskId = null);
+                  },
+                  builder: (context, _, __) {
+                    return GestureDetector(
+                      onTapUp: (details) => _handleCanvasTap(details, _transformationController.value),
+                      child: ValueListenableBuilder<Matrix4>(
+                        valueListenable: _transformationController,
+                        builder: (context, matrix, child) {
+                          return Transform(
+                            transform: matrix,
+                            child: child,
+                          );
+                        },
+                        child: RepaintBoundary(
                           child: CustomPaint(
                             size: const Size(canvasWidth, canvasHeight),
                             painter: LabLayoutPainter(
@@ -654,12 +738,12 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
                               selectedDeskId: selectedId,
                               hoveredDeskId: _hoveredDeskId,
                               gridCellSizePixels: gridCellSizePixels,
-                              transformMatrix: matrix,
+                              transformMatrix: Matrix4.identity(),
                               theme: Theme.of(context),
                             ),
                           ),
-                        );
-                      },
+                        ),
+                      ),
                     );
                   },
                 ),
@@ -695,12 +779,10 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   }
 
   Offset _clampOffset(Offset target) {
-    final RenderBox? box = context.findRenderObject() as RenderBox?;
-    final viewport = box?.size ?? MediaQuery.of(context).size;
     final scale = _transformationController.value.getMaxScaleOnAxis();
     final double w = 3200.0 * scale, h = 1700.0 * scale;
-    final double minDx = viewport.width - w - viewport.width / 2, maxDx = viewport.width / 2;
-    final double minDy = viewport.height - h - viewport.height / 2, maxDy = viewport.height / 2;
+    final double minDx = _viewportSize.width - w - _viewportSize.width / 2, maxDx = _viewportSize.width / 2;
+    final double minDy = _viewportSize.height - h - _viewportSize.height / 2, maxDy = _viewportSize.height / 2;
     return Offset(target.dx.clamp(min(minDx, maxDx), max(minDx, maxDx)), target.dy.clamp(min(minDy, maxDy), max(minDy, maxDy)));
   }
 }

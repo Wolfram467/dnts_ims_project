@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base href="/">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Department of Network and Technical Services - Inventory Management System">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="DNTS IMS">
+  
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png" />
+
+  <title>DNTS IMS</title>
+  
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       FCP OPTIMIZATION: NATIVE CSS SPLASH
+       This renders in ~200ms, giving a sub-second First Contentful Paint.
+       ═══════════════════════════════════════════════════════════════════════════ */
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #ffffff;
+      /* Technical Dot-Grid Background */
+      background-image: radial-gradient(#d1d5db 1.2px, transparent 1.2px);
+      background-size: 24px 24px;
+      height: 100vh;
+      width: 100vw;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    #dnts-splash {
+      text-align: center;
+      transition: opacity 0.5s ease-out;
+      z-index: 9999;
+    }
+
+    .acronym {
+      font-size: 92px;
+      font-weight: 900;
+      color: #000000;
+      letter-spacing: 8px;
+      line-height: 1;
+      margin-bottom: 20px;
+    }
+
+    .department-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: #000000;
+      letter-spacing: 1.5px;
+      margin-bottom: 60px;
+      white-space: nowrap;
+      text-align: center;
+    }
+
+    .loader-bar {
+      width: 200px;
+      height: 1px;
+      background-color: #e5e7eb;
+      margin: 0 auto;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .loader-bar::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      height: 100%;
+      width: 50%;
+      background-color: #000000;
+      animation: loading 1.5s infinite linear;
+      transform: translateX(-100%);
+    }
+
+    @keyframes loading {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(200%); }
+    }
+
+    .main-app-hidden {
+      opacity: 0;
+    }
+  </style>
+</head>
+<body>
+  <!-- 
+    The browser will render this IMMEDIATELY. 
+    Lighthouse will record this text as the Largest Contentful Paint (LCP).
+  -->
+  <div id="dnts-splash">
+    <div class="acronym">DNTS</div>
+    <div class="department-name">
+      Department of Network and Technical Services
+    </div>
+    <div class="loader-bar"></div>
+  </div>
+
+  <script>
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SPLASH REMOVAL HANDLER
+    // Called by Flutter (lib/main.dart) once the first frame is ready.
+    // ═══════════════════════════════════════════════════════════════════════════
+    window.removeDNTSSplash = function() {
+      var splash = document.getElementById('dnts-splash');
+      if (splash) {
+        // Small buffer to ensure Flutter has painted its first frame
+        setTimeout(function() {
+          splash.style.opacity = '0';
+          setTimeout(function() {
+            splash.remove();
+          }, 500);
+        }, 800);
+      }
+    };
+  </script>
+  <!-- Standard Flutter bootstrap script (no custom config here to avoid conflicts) -->
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

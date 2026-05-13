@@ -50,12 +50,41 @@ class DeskWidget extends ConsumerWidget {
       selectedDeskProvider.select((selectedId) => selectedId == deskId),
     );
 
-    // Watch facility inventory for this desk's components
-    final hasInventory = ref.watch(
+    // Watch facility inventory for this desk's health
+    final deskHealthColor = ref.watch(
       facilityInventoryProvider.select((asyncValue) {
         final list = asyncValue.valueOrNull;
-        if (list == null) return false;
-        return list.any((asset) => asset['location']?['name'] == deskId);
+        if (list == null) return Colors.transparent;
+
+        // Get components for this specific desk
+        final deskComponents = list.where((asset) => asset['location']?['name'] == deskId).toList();
+
+        // 1. Check for missing components (Red)
+        // Required categories for a complete PC
+        final requiredCategories = ['System Unit', 'Monitor', 'Keyboard', 'Mouse', 'SSD', 'AVR'];
+        final currentCategories = deskComponents.map((c) => c['category'].toString()).toSet();
+        
+        bool isMissing = false;
+        for (final category in requiredCategories) {
+          if (!currentCategories.contains(category)) {
+            isMissing = true;
+            break;
+          }
+        }
+
+        if (isMissing) return Colors.red.shade600;
+
+        // 2. Check for maintenance (Yellow)
+        final bool hasMaintenance = deskComponents.any((c) => 
+          c['status'].toString().toLowerCase() == 'under maintenance'
+        );
+        
+        if (hasMaintenance) return Colors.yellow.shade600;
+
+        // 3. Fully functional (Green)
+        if (deskComponents.isNotEmpty) return Colors.green.shade400;
+
+        return Colors.transparent; // No components at all (Empty)
       }),
     );
 
@@ -103,16 +132,22 @@ class DeskWidget extends ConsumerWidget {
                       ),
                     ),
                   ),
-                  if (hasInventory)
+                  if (deskHealthColor != Colors.transparent)
                     Positioned(
                       top: 4,
                       right: 4,
                       child: Container(
-                        width: 4,
-                        height: 4,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF0055FF), // Swiss Blue
+                        width: 5,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: deskHealthColor,
                           shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: deskHealthColor.withOpacity(0.4),
+                              blurRadius: 2,
+                            )
+                          ],
                         ),
                       ),
                     ),

@@ -9,7 +9,9 @@ import '../widgets/inspector_panel_widget.dart';
 import '../widgets/inventory_dock_widget.dart';
 import '../widgets/create_component_dialog.dart';
 import '../widgets/global_drag_ghost_overlay.dart';
+import '../widgets/history_panel_widget.dart';
 import '../services/pdf_report_service.dart';
+import '../providers/history_panel_provider.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PHASE 8: SYSTEMATIC FRAGMENTATION
@@ -61,6 +63,7 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
                   // PERFORMANCE: Ghost overlay is its own widget to isolate rebuilds
                   const GlobalDragGhostOverlay(),
                   const InventoryDockWidget(),
+                  const HistoryPanelWidget(),
                 ],
               ),
             ),
@@ -142,7 +145,14 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
             ],
           ),
           Row(
-            children: [],
+            children: [
+              IconButton(
+                icon: const Icon(Icons.history),
+                tooltip: 'Movement Ledger',
+                onPressed: () => ref.read(historyPanelProvider.notifier).toggle(),
+              ),
+              const SizedBox(width: 8),
+            ],
           ),
         ],
       ),

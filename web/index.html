@@ -6,11 +6,15 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="Department of Network and Technical Services - Inventory Management System">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="DNTS IMS">
+  
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png" />
 
   <title>DNTS IMS</title>
   
@@ -72,22 +76,46 @@
     .loader-bar::after {
       content: '';
       position: absolute;
-      left: -50%;
+      left: 0;
       height: 100%;
       width: 50%;
       background-color: #000000;
       animation: loading 1.5s infinite linear;
+      transform: translateX(-100%);
     }
 
     @keyframes loading {
-      0% { left: -50%; }
-      100% { left: 100%; }
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(200%); }
     }
 
     .main-app-hidden {
       opacity: 0;
     }
   </style>
+
+  <!-- 
+    ═══════════════════════════════════════════════════════════════════════════
+    ACCESSIBILITY OPTIMIZATION: VIEWPORT OVERRIDE
+    Flutter aggressively injects `user-scalable=no` into the viewport meta tag
+    on startup, which fails Lighthouse Accessibility tests. This observer 
+    intercepts that injection and forces it to remain scalable.
+    ═══════════════════════════════════════════════════════════════════════════ 
+  -->
+  <script>
+    const observer = new MutationObserver(function(mutations) {
+      mutations.forEach(function(mutation) {
+        mutation.addedNodes.forEach(function(node) {
+          if (node.tagName === 'META' && node.name === 'viewport') {
+            if (node.content.includes('user-scalable=no')) {
+              node.content = node.content.replace('user-scalable=no', 'user-scalable=yes');
+            }
+          }
+        });
+      });
+    });
+    observer.observe(document.head, { childList: true });
+  </script>
 </head>
 <body>
   <!-- 

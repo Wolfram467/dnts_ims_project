@@ -45,8 +45,8 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
       return const SizedBox.shrink();
     }
 
-    final screenWidthPixels = MediaQuery.of(context).size.width;
-    final panelWidthPixels = screenWidthPixels * inspectorPanelWidthFraction;
+    final size = MediaQuery.of(context).size;
+    final panelWidthPixels = widget.isMobile ? size.width : size.width * inspectorPanelWidthFraction;
 
     return Positioned(
       top: 0,
@@ -54,29 +54,34 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
       bottom: 0,
       child: Container(
         width: panelWidthPixels,
-        decoration: const BoxDecoration(
-          color: Color(0xFFF5F5F5), // Light gray background
+        decoration: BoxDecoration(
+          color: const Color(0xFFF5F5F5), // Light gray background
           border: Border(
-            left: BorderSide(color: Color(0xFFD1D5DB), width: 1), // Swiss border
+            left: BorderSide(color: const Color(0xFFD1D5DB), width: widget.isMobile ? 0 : 1), // Swiss border
           ),
+          boxShadow: widget.isMobile ? [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.15),
+              blurRadius: 20,
+              offset: const Offset(-5, 0),
+            )
+          ] : null,
         ),
-        child: _buildVisualWorkstationLayout(context, activeWorkstationIdentifier, activeWorkstationComponents),
-      ),
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // EMPTY STATE
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  Widget _buildEmptyStateView() {
-    return const Center(
-      child: Text(
-        'Empty Workstation',
-        style: TextStyle(
-          color: Color(0xFF9CA3AF),
-          fontSize: 14,
-          fontWeight: FontWeight.w300,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // HOLISTIC SCALING: Calculate scale factor based on reference height (800px)
+            final double scaleFactor = (constraints.maxHeight / 800.0).clamp(0.6, 1.2);
+            
+            return Padding(
+              padding: EdgeInsets.all(24.0 * scaleFactor),
+              child: _buildVisualWorkstationLayout(
+                context, 
+                activeWorkstationIdentifier, 
+                activeWorkstationComponents,
+                scaleFactor,
+              ),
+            );
+          },
         ),
       ),
     );
@@ -91,56 +96,46 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
     BuildContext context,
     String workstationIdentifier,
     List<HardwareComponent> workstationComponents,
+    double scaleFactor,
   ) {
-    final bool isCompact = MediaQuery.of(context).size.height < 600;
+    final double gap = 12.0 * scaleFactor;
 
     Widget buildRow1() => Row(
       children: [
         Expanded(
           flex: 7,
-          child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Keyboard'),
+          child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Keyboard', scaleFactor),
         ),
-        const SizedBox(width: 12),
+        SizedBox(width: gap),
         Expanded(
           flex: 3,
-          child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Mouse'),
+          child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Mouse', scaleFactor),
         ),
       ],
     );
 
-    Widget content = Column(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Row 1: Keyboard and Mouse
-        isCompact ? SizedBox(height: 90, child: buildRow1()) : Expanded(flex: 2, child: buildRow1()),
-        const SizedBox(height: 12),
+        // Row 1: Keyboard and Mouse (1x Height)
+        Expanded(flex: 1, child: buildRow1()),
+        SizedBox(height: gap),
 
-        // Row 2: Monitor (Double Height)
-        isCompact 
-          ? SizedBox(height: 180, child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Monitor'))
-          : Expanded(flex: 4, child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Monitor')),
-        const SizedBox(height: 12),
+        // Row 2: Monitor (2x Height)
+        Expanded(flex: 2, child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Monitor', scaleFactor)),
+        SizedBox(height: gap),
 
-        // Row 3: System Unit with nested SSD (Double Height)
-        isCompact
-          ? SizedBox(height: 180, child: _buildSystemUnitWithNestedSsdSlot(context, workstationIdentifier, workstationComponents))
-          : Expanded(flex: 4, child: _buildSystemUnitWithNestedSsdSlot(context, workstationIdentifier, workstationComponents)),
-        const SizedBox(height: 12),
+        // Row 3: System Unit with nested SSD (2x Height)
+        Expanded(flex: 2, child: _buildSystemUnitWithNestedSsdSlot(context, workstationIdentifier, workstationComponents, scaleFactor)),
+        SizedBox(height: gap),
 
-        // Row 4: AVR
-        isCompact
-          ? SizedBox(height: 90, child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'AVR'))
-          : Expanded(flex: 2, child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'AVR')),
-        const SizedBox(height: 24),
+        // Row 4: AVR (1x Height)
+        Expanded(flex: 1, child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'AVR', scaleFactor)),
+        SizedBox(height: 24 * scaleFactor),
 
         // Close Button
-        _buildPanelCloseButton(),
+        _buildPanelCloseButton(scaleFactor),
       ],
-    );
-
-    return Padding(
-      padding: EdgeInsets.all(isCompact ? 8 : 24),
-      child: isCompact ? SingleChildScrollView(child: content) : content,
     );
   }
 
@@ -148,12 +143,13 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
   // COMPONENT SLOTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /// Build the internal content of a component slot (shared between standard and nested layouts)
+  /// Build the internal content of a component slot
   Widget _buildComponentSlotContent(
     BuildContext context,
     String workstationIdentifier,
     List<HardwareComponent> workstationComponents,
-    String targetCategory, {
+    String targetCategory,
+    double scaleFactor, {
     bool isNestedComponent = false,
   }) {
     HardwareComponent? foundComponent;
@@ -166,51 +162,51 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
     }
 
     final bool isComponentFound = foundComponent != null;
-    final double horizontalPadding = isNestedComponent ? 10.0 : 16.0;
-    final double verticalPadding = isNestedComponent ? 10.0 : 16.0;
+    final double padding = (isNestedComponent ? 10.0 : 16.0) * scaleFactor;
 
     return InkWell(
       onTap: isComponentFound
           ? () => _openComponentEditDialog(context, workstationIdentifier, foundComponent!)
           : null,
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: verticalPadding),
+        padding: EdgeInsets.all(padding),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Text(
-                  targetCategory.toUpperCase(),
-                  style: TextStyle(
-                    fontSize: isNestedComponent ? 13 : 15,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                    letterSpacing: 1.0,
+                // Status Light Indicator
+                Container(
+                  width: 8 * scaleFactor,
+                  height: 8 * scaleFactor,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _resolveStatusLightColor(isComponentFound ? foundComponent.status : 'Empty'),
+                    boxShadow: isComponentFound && foundComponent.status.toLowerCase() == 'deployed' 
+                      ? [BoxShadow(color: Colors.green.withOpacity(0.5), blurRadius: 4 * scaleFactor)] 
+                      : null,
                   ),
                 ),
-                const SizedBox(width: 10),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: isComponentFound ? const Color(0xFFA7F3D0) : const Color(0xFF4B5563),
-                    borderRadius: BorderRadius.zero,
-                  ),
-                  child: Text(
-                    isComponentFound ? (foundComponent.status).toUpperCase() : 'NOT FOUND',
-                    style: const TextStyle(
-                      fontSize: 8,
-                      fontWeight: FontWeight.w900,
-                      color: Color(0xFF111827),
-                      letterSpacing: 0.5,
+                SizedBox(width: 8 * scaleFactor),
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      targetCategory.toUpperCase(),
+                      style: TextStyle(
+                        fontSize: (isNestedComponent ? 13 : 15) * scaleFactor,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                        letterSpacing: 1.0 * scaleFactor,
+                      ),
                     ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 6),
-            // Serial Number with scale-down logic for long strings
+            SizedBox(height: 4 * scaleFactor),
+            // Serial Number with scale-down logic
             SizedBox(
               width: double.infinity,
               child: FittedBox(
@@ -219,10 +215,10 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
                 child: Text(
                   isComponentFound ? 'DNTS: ${foundComponent.dntsSerial}' : 'Empty Slot',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 12 * scaleFactor,
                     fontWeight: FontWeight.w400,
                     color: isComponentFound ? const Color(0xFFD1D5DB) : const Color(0xFF9CA3AF),
-                    letterSpacing: 0.25,
+                    letterSpacing: 0.25 * scaleFactor,
                   ),
                 ),
               ),
@@ -233,20 +229,20 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
     );
   }
 
-  /// Build a fixed component slot with data handling and empty states
+  /// Build a fixed component slot
   Widget _buildComponentSlot(
     BuildContext context,
     String workstationIdentifier,
     List<HardwareComponent> workstationComponents,
     String targetCategory,
+    double scaleFactor,
   ) {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF374151), // Deep Anthracite
         border: Border.all(color: Colors.black, width: 1),
-        borderRadius: BorderRadius.zero, // Swiss Style
       ),
-      child: _buildComponentSlotContent(context, workstationIdentifier, workstationComponents, targetCategory),
+      child: _buildComponentSlotContent(context, workstationIdentifier, workstationComponents, targetCategory, scaleFactor),
     );
   }
 
@@ -255,17 +251,16 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
     BuildContext context,
     String workstationIdentifier,
     List<HardwareComponent> workstationComponents,
+    double scaleFactor,
   ) {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF374151), // Deep Anthracite
         border: Border.all(color: Colors.black, width: 1),
-        borderRadius: BorderRadius.zero, // Swiss Style
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Left side: System Unit details (60% width)
           Expanded(
             flex: 6,
             child: _buildComponentSlotContent(
@@ -273,29 +268,29 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
               workstationIdentifier, 
               workstationComponents, 
               'System Unit',
+              scaleFactor,
             ),
           ),
-          // Right side: SSD area (40% width)
           Expanded(
             flex: 4,
             child: Padding(
-              padding: const EdgeInsets.only(right: 16),
+              padding: EdgeInsets.only(right: 16 * scaleFactor),
               child: Column(
                 children: [
                   const Spacer(flex: 1),
                   Expanded(
-                    flex: 2,
+                    flex: 4,
                     child: Container(
                       decoration: BoxDecoration(
                         color: const Color(0xFF374151),
                         border: Border.all(color: Colors.black, width: 1),
-                        borderRadius: BorderRadius.zero,
                       ),
                       child: _buildComponentSlotContent(
                         context, 
                         workstationIdentifier, 
                         workstationComponents, 
                         'SSD',
+                        scaleFactor,
                         isNestedComponent: true,
                       ),
                     ),
@@ -335,27 +330,23 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
   // CLOSE BUTTON
   // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildPanelCloseButton() {
-    final bool isCompact = MediaQuery.of(context).size.height < 600;
-
+  Widget _buildPanelCloseButton(double scaleFactor) {
     return SizedBox(
-      height: isCompact ? 36 : 56,
+      height: 56 * scaleFactor,
       child: ElevatedButton(
         onPressed: _closeInspector,
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFF374151),
           foregroundColor: Colors.white,
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.zero, // Swiss Style
-          ),
+          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
           elevation: 0,
         ),
-        child: const Text(
+        child: Text(
           'CLOSE',
           style: TextStyle(
-            fontSize: 16,
+            fontSize: 16 * scaleFactor,
             fontWeight: FontWeight.w500,
-            letterSpacing: 1.5,
+            letterSpacing: 1.5 * scaleFactor,
           ),
         ),
       ),
@@ -384,7 +375,24 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
   // HELPERS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /// Get status badge color
+  /// Get status light color
+  Color _resolveStatusLightColor(String? deploymentStatus) {
+    switch (deploymentStatus?.toLowerCase()) {
+      case 'deployed':
+        return Colors.green.shade400; // Functional
+      case 'under maintenance':
+        return Colors.yellow.shade600; // Maintenance
+      case 'empty':
+      case 'not found':
+      case 'storage':
+      case 'in storage':
+        return Colors.grey.shade500; // Not Found
+      default:
+        return Colors.grey.shade500;
+    }
+  }
+
+  /// Get status badge color (Legacy, kept for compatibility if needed)
   Color _resolveStatusColor(String? deploymentStatus) {
     switch (deploymentStatus?.toLowerCase()) {
       case 'deployed':

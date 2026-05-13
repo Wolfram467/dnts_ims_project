@@ -8,7 +8,6 @@ import '../widgets/settings_dialog.dart';
 import 'auth_screen.dart';
 import 'dashboard_screen.dart';
 import 'interactive_map_screen.dart';
-import 'movement_history_screen.dart';
 import 'admin_dashboard_screen.dart';
 
 class MainLayout extends ConsumerStatefulWidget {
@@ -27,6 +26,29 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
   void initState() {
     super.initState();
     _loadUserRole();
+    _handleInitialTab();
+  }
+
+  void _handleInitialTab() {
+    final tab = Uri.base.queryParameters['tab']?.toLowerCase();
+    if (tab == null) return;
+
+    final Map<String, int> tabMapping = {
+      'dashboard': 0,
+      'inventory': 1,
+      'history': 2,
+      'network': 3,
+      'schedule': 4,
+      'sit-in': 5,
+      'violation': 6,
+      'energy': 7,
+    };
+
+    if (tabMapping.containsKey(tab)) {
+      setState(() {
+        selectedIndex = tabMapping[tab]!;
+      });
+    }
   }
 
   Future<void> _loadUserRole() async {
@@ -65,8 +87,6 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
         return const DashboardScreen();
       case 1:
         return InteractiveMapScreen(userRole: _userRole ?? 'viewer');
-      case 2:
-        return const MovementHistoryScreen();
       default:
         return const Center(
           child: Text(
@@ -199,11 +219,6 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
                           icon: Icon(Icons.inventory_2_outlined),
                           selectedIcon: Icon(Icons.inventory_2),
                           label: Text('Inventory'),
-                        ),
-                        NavigationRailDestination(
-                          icon: Icon(Icons.history_outlined),
-                          selectedIcon: Icon(Icons.history),
-                          label: Text('History'),
                         ),
                         NavigationRailDestination(
                           icon: Icon(Icons.router_outlined),
