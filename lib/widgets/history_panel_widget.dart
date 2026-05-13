@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../providers/history_panel_provider.dart';
+import '../providers/dock_provider.dart';
 import '../screens/movement_history_screen.dart';
 
 class HistoryPanelWidget extends ConsumerStatefulWidget {
@@ -55,55 +56,35 @@ class _HistoryPanelWidgetState extends ConsumerState<HistoryPanelWidget> {
     final logsAsync = ref.watch(movementLogsStreamProvider);
     final screenWidth = MediaQuery.of(context).size.width;
     
-    // Panel width configuration
-    final double panelWidth = screenWidth > 600 ? 400 : screenWidth * 0.85;
+    // Panel width configuration: 30% of screen width
+    final double panelWidth = screenWidth * 0.3;
+    
+    // Dynamic left position: 
+    // If closed: -panelWidth
+    // If open: 0
+    final double leftPosition = isOpen ? 0 : -panelWidth;
 
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
-      right: isOpen ? 0 : -panelWidth,
+      left: leftPosition,
       top: 0,
       bottom: 0,
       child: Container(
         width: panelWidth,
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
-          border: Border(left: BorderSide(color: Theme.of(context).dividerColor, width: 1)),
+          border: Border(right: BorderSide(color: Theme.of(context).dividerColor, width: 1)),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.1),
               blurRadius: 10,
-              offset: const Offset(-5, 0),
+              offset: const Offset(5, 0),
             ),
           ],
         ),
         child: Column(
           children: [
-            // Header
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-              decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'MOVEMENT LEDGER',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w300,
-                      letterSpacing: 2.0,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => ref.read(historyPanelProvider.notifier).close(),
-                  ),
-                ],
-              ),
-            ),
-
             // Search Filter
             Padding(
               padding: const EdgeInsets.all(16),

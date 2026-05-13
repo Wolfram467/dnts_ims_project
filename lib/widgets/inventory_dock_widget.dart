@@ -24,14 +24,16 @@ class InventoryDockWidget extends ConsumerWidget {
     final isExpanded = dockState.isExpanded;
     final selectedFacility = ref.watch(selectedFacilityProvider);
     final inventoryAsync = ref.watch(facilityInventoryProvider);
+    final screenWidth = MediaQuery.of(context).size.width;
+    final panelWidth = screenWidth * 0.3;
 
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 400),
       curve: Curves.easeInOutCubic,
       top: 0,
       bottom: 0,
-      left: isExpanded ? 0 : -400,
-      width: 400,
+      left: isExpanded ? 0 : -panelWidth,
+      width: panelWidth,
       child: Container(
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
@@ -65,6 +67,7 @@ class InventoryDockWidget extends ConsumerWidget {
   }
 
   Map<String, Map<String, List<Map<String, dynamic>>>> _groupInventory(List<Map<String, dynamic>> inventory) {
+// ... (rest of the method unchanged)
     final Map<String, Map<String, List<Map<String, dynamic>>>> result = {};
     for (final item in inventory) {
       final deskId = item['location']?['name'] as String? ?? 'Unknown';
@@ -113,13 +116,11 @@ class InventoryDockWidget extends ConsumerWidget {
     String selectedFacility,
     Map<String, Map<String, List<Map<String, dynamic>>>> groupedComponents,
   ) {
-    // SECURE UX: All header UI elements (Title, Close, Dropdown, Print) 
-    // have been visually removed as requested, while retaining the print 
-    // methods in the class for future relocation.
     return const SizedBox.shrink();
   }
 
   void _showPrintSettingsDialog(
+// ... (rest of the method unchanged)
     BuildContext context, 
     WidgetRef ref, 
     String selectedFacility,
@@ -256,6 +257,18 @@ class InventoryDockWidget extends ConsumerWidget {
               facilityName,
               style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
             ),
+            trailing: facilityName.startsWith('Lab ')
+                ? IconButton(
+                    icon: const Icon(Icons.print, size: 20),
+                    onPressed: () => _showPrintSettingsDialog(
+                      context,
+                      ref,
+                      facilityName,
+                      groupedComponents,
+                    ),
+                    tooltip: 'Print Inventory Report',
+                  )
+                : null,
             iconColor: Theme.of(context).colorScheme.onSurface,
             collapsedIconColor: Theme.of(context).colorScheme.onSurface,
             children: categoriesMap.keys.map((categoryName) {

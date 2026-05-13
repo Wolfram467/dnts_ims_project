@@ -40,38 +40,40 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
     final activeWorkstationComponentsAsync = ref.watch(activeDeskComponentsProvider);
     final activeWorkstationComponents = activeWorkstationComponentsAsync.valueOrNull ?? [];
 
-    // Don't render if inspector is closed
-    if (!isInspectorOpen || activeWorkstationIdentifier == null) {
-      return const SizedBox.shrink();
-    }
-
     final size = MediaQuery.of(context).size;
-    final panelWidthPixels = widget.isMobile ? size.width : size.width * inspectorPanelWidthFraction;
+    
+    // Panel width set to 40%
+    const double panelWidthFraction = 0.4;
+    final panelWidthPixels = widget.isMobile ? size.width : size.width * panelWidthFraction;
 
-    return Positioned(
+    return AnimatedPositioned(
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeInOutCubic,
       top: 0,
-      right: 0,
+      right: isInspectorOpen && activeWorkstationIdentifier != null ? 0 : -panelWidthPixels,
       bottom: 0,
+      width: panelWidthPixels,
       child: Container(
-        width: panelWidthPixels,
         decoration: BoxDecoration(
           color: const Color(0xFFF5F5F5), // Light gray background
           border: Border(
             left: BorderSide(color: const Color(0xFFD1D5DB), width: widget.isMobile ? 0 : 1), // Swiss border
           ),
-          boxShadow: widget.isMobile ? [
+          boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.15),
               blurRadius: 20,
               offset: const Offset(-5, 0),
             )
-          ] : null,
+          ],
         ),
         child: LayoutBuilder(
           builder: (context, constraints) {
             // HOLISTIC SCALING: Calculate scale factor based on reference height (800px)
             final double scaleFactor = (constraints.maxHeight / 800.0).clamp(0.6, 1.2);
             
+            if (activeWorkstationIdentifier == null) return const SizedBox.shrink();
+
             return Padding(
               padding: EdgeInsets.all(24.0 * scaleFactor),
               child: _buildVisualWorkstationLayout(
@@ -162,68 +164,91 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
     }
 
     final bool isComponentFound = foundComponent != null;
+    final bool isCreationMode = ref.watch(isCreationModeProvider);
+    final String? selectedCreationType = ref.watch(selectedCreationTypeProvider);
+    final bool isSelectedForCreation = isCreationMode && selectedCreationType?.toLowerCase() == targetCategory.toLowerCase();
+    
     final double padding = (isNestedComponent ? 10.0 : 16.0) * scaleFactor;
 
     return InkWell(
-      onTap: isComponentFound
-          ? () => _openComponentEditDialog(context, workstationIdentifier, foundComponent!)
-          : null,
-      child: Padding(
-        padding: EdgeInsets.all(padding),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                // Status Light Indicator
-                Container(
-                  width: 8 * scaleFactor,
-                  height: 8 * scaleFactor,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _resolveStatusLightColor(isComponentFound ? foundComponent.status : 'Empty'),
-                    boxShadow: isComponentFound && foundComponent.status.toLowerCase() == 'deployed' 
-                      ? [BoxShadow(color: Colors.green.withOpacity(0.5), blurRadius: 4 * scaleFactor)] 
-                      : null,
+      onTap: () {
+        if (isCreationMode) {
+          ref.read(selectedCreationTypeProvider.notifier).state = targetCategory;
+        } else if (isComponentFound) {
+          _openComponentEditDialog(context, workstationIdentifier, foundComponent!);
+        } else {
+          // Shortcut: Start creation mode for this type
+          ref.read(isCreationModeProvider.notifier).state = true;
+          ref.read(selectedCreationTypeProvider.notifier).state = targetCategory;
+        }
+      },
+      child: Container(
+        decoration: isSelectedForCreation ? BoxDecoration(
+          border: Border.all(color: const Color(0xFF00E676), width: 2 * scaleFactor), // Highlight with Carbon Mint
+        ) : null,
+        child: Padding(
+          padding: EdgeInsets.all(padding),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  // Status Light Indicator
+                  Container(
+                    width: 8 * scaleFactor,
+                    height: 8 * scaleFactor,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isSelectedForCreation 
+                        ? const Color(0xFF00E676)
+                        : _resolveStatusLightColor(isComponentFound ? foundComponent.status : 'Empty'),
+                      boxShadow: (isComponentFound && foundComponent.status.toLowerCase() == 'deployed') || isSelectedForCreation
+                        ? [BoxShadow(color: (isSelectedForCreation ? const Color(0xFF00E676) : Colors.green).withOpacity(0.5), blurRadius: 4 * scaleFactor)] 
+                        : null,
+                    ),
                   ),
-                ),
-                SizedBox(width: 8 * scaleFactor),
-                Flexible(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      targetCategory.toUpperCase(),
-                      style: TextStyle(
-                        fontSize: (isNestedComponent ? 13 : 15) * scaleFactor,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                        letterSpacing: 1.0 * scaleFactor,
+                  SizedBox(width: 8 * scaleFactor),
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        targetCategory.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: (isNestedComponent ? 13 : 15) * scaleFactor,
+                          fontWeight: FontWeight.w700,
+                          color: isSelectedForCreation ? const Color(0xFF00E676) : Colors.white,
+                          letterSpacing: 1.0 * scaleFactor,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            ),
-            SizedBox(height: 4 * scaleFactor),
-            // Serial Number with scale-down logic
-            SizedBox(
-              width: double.infinity,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  isComponentFound ? 'DNTS: ${foundComponent.dntsSerial}' : 'Empty Slot',
-                  style: TextStyle(
-                    fontSize: 12 * scaleFactor,
-                    fontWeight: FontWeight.w400,
-                    color: isComponentFound ? const Color(0xFFD1D5DB) : const Color(0xFF9CA3AF),
-                    letterSpacing: 0.25 * scaleFactor,
+                ],
+              ),
+              SizedBox(height: 4 * scaleFactor),
+              // Serial Number with scale-down logic
+              SizedBox(
+                width: double.infinity,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    isSelectedForCreation 
+                      ? 'SELECTED FOR CREATION'
+                      : (isComponentFound ? 'DNTS: ${foundComponent.dntsSerial}' : 'Empty Slot'),
+                    style: TextStyle(
+                      fontSize: 12 * scaleFactor,
+                      fontWeight: FontWeight.w400,
+                      color: isSelectedForCreation 
+                        ? const Color(0xFF00E676).withOpacity(0.8)
+                        : (isComponentFound ? const Color(0xFFD1D5DB) : const Color(0xFF9CA3AF)),
+                      letterSpacing: 0.25 * scaleFactor,
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -253,6 +278,7 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
     List<HardwareComponent> workstationComponents,
     double scaleFactor,
   ) {
+    final double gap = 12.0 * scaleFactor;
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF374151), // Deep Anthracite
@@ -262,7 +288,7 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
-            flex: 6,
+            flex: 7, // Matches Keyboard width proportion
             child: _buildComponentSlotContent(
               context, 
               workstationIdentifier, 
@@ -271,15 +297,16 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
               scaleFactor,
             ),
           ),
+          VerticalDivider(color: Colors.black, width: 1, thickness: 1),
           Expanded(
-            flex: 4,
+            flex: 3, // Matches Mouse width proportion
             child: Padding(
-              padding: EdgeInsets.only(right: 16 * scaleFactor),
+              padding: EdgeInsets.symmetric(horizontal: 8 * scaleFactor),
               child: Column(
                 children: [
                   const Spacer(flex: 1),
                   Expanded(
-                    flex: 4,
+                    flex: 2, // 2/4 = 0.5 of height. Since parent is flex 2, 0.5 * 2 = 1.0 (Matches Keyboard/AVR height)
                     child: Container(
                       decoration: BoxDecoration(
                         color: const Color(0xFF374151),
@@ -331,18 +358,30 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
   // ═══════════════════════════════════════════════════════════════════════════
 
   Widget _buildPanelCloseButton(double scaleFactor) {
+    final bool isCreationMode = ref.watch(isCreationModeProvider);
+    
     return SizedBox(
       height: 56 * scaleFactor,
       child: ElevatedButton(
-        onPressed: _closeInspector,
+        onPressed: () {
+          if (isCreationMode) {
+            // First click: Close creation mode only
+            ref.read(isCreationModeProvider.notifier).state = false;
+            ref.read(selectedCreationTypeProvider.notifier).state = null;
+            ref.read(draftComponentProvider.notifier).state = {};
+          } else {
+            // Second click (or if not in creation): Close inspector
+            _closeInspector();
+          }
+        },
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF374151),
+          backgroundColor: isCreationMode ? Colors.black : const Color(0xFF374151),
           foregroundColor: Colors.white,
           shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
           elevation: 0,
         ),
         child: Text(
-          'CLOSE',
+          isCreationMode ? 'CLOSE CREATION' : 'CLOSE',
           style: TextStyle(
             fontSize: 16 * scaleFactor,
             fontWeight: FontWeight.w500,
@@ -364,6 +403,12 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
     } else {
       ref.read(inspectorStateProvider.notifier).closeInspector();
     }
+    
+    // Reset Creation State (Double-safety)
+    ref.read(isCreationModeProvider.notifier).state = false;
+    ref.read(selectedCreationTypeProvider.notifier).state = null;
+    ref.read(draftComponentProvider.notifier).state = {};
+
     ref.read(activeDeskProvider.notifier).clearActiveDesk();
     ref.read(selectedDeskProvider.notifier).clearSelection();
 

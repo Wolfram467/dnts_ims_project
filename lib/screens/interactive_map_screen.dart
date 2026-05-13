@@ -7,7 +7,7 @@ import '../utils/drag_boundary_calculator.dart';
 import '../widgets/map_canvas_widget.dart';
 import '../widgets/inspector_panel_widget.dart';
 import '../widgets/inventory_dock_widget.dart';
-import '../widgets/create_component_dialog.dart';
+import '../widgets/create_component_panel.dart';
 import '../widgets/global_drag_ghost_overlay.dart';
 import '../widgets/history_panel_widget.dart';
 import '../services/pdf_report_service.dart';
@@ -49,34 +49,42 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
     final selectedFacility = ref.watch(selectedFacilityProvider);
 
     return Scaffold(
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: Stack(
         children: [
-          _buildScreenHeader(context),
-          Expanded(
-            child: Listener(
-              onPointerMove: (pointerEvent) => _processPointerMovement(context, ref, pointerEvent),
-              child: Stack(
-                children: [
-                  MapCanvasWidget(facilityId: selectedFacility),
-                  const InspectorPanelWidget(),
-                  // PERFORMANCE: Ghost overlay is its own widget to isolate rebuilds
-                  const GlobalDragGhostOverlay(),
-                  const InventoryDockWidget(),
-                  const HistoryPanelWidget(),
-                ],
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildScreenHeader(context),
+              Expanded(
+                child: Listener(
+                  onPointerMove: (pointerEvent) => _processPointerMovement(context, ref, pointerEvent),
+                  child: Stack(
+                    children: [
+                      MapCanvasWidget(facilityId: selectedFacility),
+                      const InventoryDockWidget(),
+                      const HistoryPanelWidget(),
+                    ],
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
+          // GLOBAL OVERLAYS (Ordered back-to-front)
+          // Only the Inspector and Drag Ghost overlay the header
+          const InspectorPanelWidget(),
+          
+          // CREATE COMPONENT PANEL (Conditional Overlay)
+          if (ref.watch(isCreationModeProvider))
+            const CreateComponentPanel(),
+
+          // PERFORMANCE: Ghost overlay is its own widget to isolate rebuilds
+          const GlobalDragGhostOverlay(),
         ],
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: ref.watch(isCreationModeProvider) ? null : FloatingActionButton(
         onPressed: () {
-          showDialog(
-            context: context,
-            builder: (context) => const CreateComponentDialog(),
-          );
+          ref.read(isCreationModeProvider.notifier).state = true;
         },
         backgroundColor: const Color(0xFF374151),
         foregroundColor: Colors.white,
@@ -84,7 +92,7 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
           borderRadius: BorderRadius.zero,
         ),
         elevation: 0,
-        child: const Icon(Icons.add),
+        child: const Icon(Icons.add_box),
       ),
     );
   }
@@ -95,6 +103,7 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
 
   Widget _buildScreenHeader(BuildContext context) {
     final isDockExpanded = ref.watch(dockProvider.select((state) => state.isExpanded));
+    final isHistoryOpen = ref.watch(historyPanelProvider);
     final bool isCompact = MediaQuery.of(context).size.height < 600;
 
     return Container(
@@ -108,8 +117,14 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
         children: [
           Row(
             children: [
+              // Inventory Audit Toggle
               InkWell(
                 onTap: () {
+                  final isCurrentlyExpanded = ref.read(dockProvider).isExpanded;
+                  if (!isCurrentlyExpanded) {
+                    // Opening Audit, so close History
+                    ref.read(historyPanelProvider.notifier).close();
+                  }
                   ref.read(dockProvider.notifier).toggleExpanded();
                   ref.read(refreshTriggerProvider.notifier).state++;
                   ref.read(cameraControlProvider.notifier).fitAllLabs();
@@ -132,7 +147,36 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
                   ),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 8),
+              // Movement Ledger Toggle (Moved from right to left)
+              InkWell(
+                onTap: () {
+                  final isCurrentlyOpen = ref.read(historyPanelProvider);
+                  if (!isCurrentlyOpen) {
+                    // Opening History, so close Audit
+                    ref.read(dockProvider.notifier).setExpanded(false);
+                  }
+                  ref.read(historyPanelProvider.notifier).toggle();
+                },
+                mouseCursor: SystemMouseCursors.click,
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: isHistoryOpen 
+                        ? Theme.of(context).colorScheme.onSurface 
+                        : Theme.of(context).colorScheme.surface,
+                    border: Border.all(color: Theme.of(context).colorScheme.onSurface, width: 1),
+                  ),
+                  child: Icon(
+                    isHistoryOpen ? Icons.close : Icons.history,
+                    color: isHistoryOpen 
+                        ? Theme.of(context).colorScheme.surface 
+                        : Theme.of(context).colorScheme.onSurface,
+                    size: isCompact ? 20 : 24,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 24),
               Text(
                 'Inventory Management System',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -144,16 +188,8 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
               ),
             ],
           ),
-          Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.history),
-                tooltip: 'Movement Ledger',
-                onPressed: () => ref.read(historyPanelProvider.notifier).toggle(),
-              ),
-              const SizedBox(width: 8),
-            ],
-          ),
+          // Empty right side to let the header "breathe"
+          const SizedBox.shrink(),
         ],
       ),
     );

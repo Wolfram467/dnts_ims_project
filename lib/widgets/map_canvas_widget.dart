@@ -12,7 +12,7 @@ import '../models/workstation_config.dart';
 import '../utils/keyboard_shortcuts.dart';
 import '../services/camera_state_service.dart';
 import 'inspector_panel_widget.dart';
-import 'create_component_dialog.dart';
+import 'create_component_panel.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PERFORMANCE OPTIMIZATION: CANVAS ENGINE
@@ -444,7 +444,9 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   Future<void> _loadWorkstationComponents(String deskId) async {
     if (ref.read(isLocationPickingModeProvider)) {
       ref.read(isLocationPickingModeProvider.notifier).state = false;
-      showDialog(context: context, builder: (_) => CreateComponentDialog(initialLocation: deskId));
+      ref.read(isCreationModeProvider.notifier).state = true;
+      ref.read(activeDeskProvider.notifier).setActiveDesk(deskId);
+      ref.read(inspectorStateProvider.notifier).openInspector();
       return;
     }
 

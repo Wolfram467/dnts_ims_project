@@ -383,5 +383,11 @@ final facilityInventoryProvider = StreamProvider<List<Map<String, dynamic>>>((re
 /// Tracks whether the user is currently selecting a location for a new component.
 final isLocationPickingModeProvider = StateProvider<bool>((ref) => false);
 
+/// Tracks whether the application is in "Component Creation Mode".
+final isCreationModeProvider = StateProvider<bool>((ref) => false);
+
+/// Tracks the currently selected component type for the new asset.
+final selectedCreationTypeProvider = StateProvider<String?>((ref) => null);
+
 /// Persists the draft inputs of the component creation form during location picking.
 final draftComponentProvider = StateProvider<Map<String, String>>((ref) => {});

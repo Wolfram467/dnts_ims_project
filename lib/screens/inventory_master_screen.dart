@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../widgets/create_component_dialog.dart';
+import '../widgets/create_component_panel.dart';
 
 class InventoryMasterScreen extends StatefulWidget {
   final String userRole;
@@ -441,7 +441,11 @@ class _InventoryMasterScreenState extends State<InventoryMasterScreen> {
               onPressed: () {
                 showDialog(
                   context: context,
-                  builder: (context) => const CreateComponentDialog(),
+                  builder: (context) => const Dialog(
+                    backgroundColor: Colors.transparent,
+                    insetPadding: EdgeInsets.zero,
+                    child: CreateComponentPanel(),
+                  ),
                 );
               },
               backgroundColor: const Color(0xFF374151),
@@ -450,7 +454,7 @@ class _InventoryMasterScreenState extends State<InventoryMasterScreen> {
                 borderRadius: BorderRadius.zero,
               ),
               elevation: 0,
-              child: const Icon(Icons.add),
+              child: const Icon(Icons.add_box),
             )
           : null,
     );
