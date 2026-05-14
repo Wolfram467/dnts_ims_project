@@ -7,7 +7,7 @@ class SerialScannerService {
 
   SerialScannerService(String apiKey)
       : _model = GenerativeModel(
-          model: 'gemma-4-26b', // High-quota model (1.5k RPD) for extensive audits
+          model: 'gemma-4-26b-a4b-it', // Specific high-quota identifier provided by user
           apiKey: apiKey,
           generationConfig: GenerationConfig(
             responseMimeType: 'application/json',
