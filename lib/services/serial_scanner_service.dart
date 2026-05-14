@@ -7,7 +7,7 @@ class SerialScannerService {
 
   SerialScannerService(String apiKey)
       : _model = GenerativeModel(
-          model: 'gemini-2.5-flash', // Verified available stable powerhouse (June 2025 release)
+          model: 'gemma-4-26b', // High-quota model (1.5k RPD) for extensive audits
           apiKey: apiKey,
           generationConfig: GenerationConfig(
             responseMimeType: 'application/json',
@@ -15,7 +15,7 @@ class SerialScannerService {
         );
 
   /// Processes an image and extracts the manufacturer serial number.
-  /// Uses Gemini 2.5 Flash for agentic, multi-stage reasoning.
+  /// Uses Gemma 4 26B for high-volume agentic reasoning.
   Future<String?> extractSerialNumber(String imagePath) async {
     try {
       final imageBytes = await File(imagePath).readAsBytes();
