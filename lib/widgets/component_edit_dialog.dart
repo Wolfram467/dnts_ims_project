@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../providers/repository_providers.dart';
 import '../providers/map_state_provider.dart';
+import '../providers/service_providers.dart';
 import '../models/hardware_component.dart';
+import 'serial_scanner_overlay.dart';
 
 /// ============================================================================
 /// COMPONENT EDIT DIALOG
@@ -107,6 +111,43 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
       _dntsSerialNumberErrorText = null;
     });
     return true;
+  }
+
+  Future<void> _startScanning() async {
+    final status = await Permission.camera.request();
+    if (!status.isGranted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Camera permission is required to scan serial numbers')),
+        );
+      }
+      return;
+    }
+
+    final imagePath = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (context) => const SerialScannerOverlay()),
+    );
+
+    if (imagePath != null && mounted) {
+      ref.read(isScanningProvider.notifier).state = true;
+      final scannerService = ref.read(serialScannerServiceProvider);
+      
+      final result = await scannerService.extractSerialNumber(imagePath);
+      
+      if (mounted) {
+        ref.read(isScanningProvider.notifier).state = false;
+        if (result != null) {
+          setState(() {
+            _manufacturingSerialNumberController.text = result;
+          });
+        } else {
+          SystemSound.play(SystemSoundType.alert);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not detect serial number. Please try again or enter manually.')),
+          );
+        }
+      }
+    }
   }
 
   /// Save changes
@@ -268,6 +309,8 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
       borderSide: BorderSide(color: Colors.black, width: 1),
     );
 
+    final isScanning = ref.watch(isScanningProvider);
+
     final inputDecoration = InputDecoration(
       border: defaultBorder,
       enabledBorder: defaultBorder,
@@ -369,9 +412,14 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
               TextFormField(
                 controller: _manufacturingSerialNumberController,
                 decoration: inputDecoration.copyWith(
-                  labelText: 'Manufacturer Serial Number',
+                  labelText: isScanning ? 'Scanning...' : 'Manufacturer Serial Number',
                   hintText: 'Enter manufacturer serial',
                   prefixIcon: const Icon(Icons.tag),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.camera_alt),
+                    onPressed: isScanning ? null : _startScanning,
+                    tooltip: 'Scan Serial Number',
+                  ),
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {

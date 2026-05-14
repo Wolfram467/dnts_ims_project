@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../models/hardware_component.dart';
 import '../providers/repository_providers.dart';
 import '../providers/map_state_provider.dart';
+import '../providers/service_providers.dart';
+import 'serial_scanner_overlay.dart';
 
 class CreateComponentPanel extends ConsumerStatefulWidget {
   final String? initialLocation;
@@ -108,6 +112,43 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
     }
   }
 
+  Future<void> _startScanning(TextEditingController targetController) async {
+    final status = await Permission.camera.request();
+    if (!status.isGranted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Camera permission is required to scan serial numbers')),
+        );
+      }
+      return;
+    }
+
+    final imagePath = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (context) => const SerialScannerOverlay()),
+    );
+
+    if (imagePath != null && mounted) {
+      ref.read(isScanningProvider.notifier).state = true;
+      final scannerService = ref.read(serialScannerServiceProvider);
+      
+      final result = await scannerService.extractSerialNumber(imagePath);
+      
+      if (mounted) {
+        ref.read(isScanningProvider.notifier).state = false;
+        if (result != null) {
+          setState(() {
+            targetController.text = result;
+          });
+        } else {
+          SystemSound.play(SystemSoundType.alert);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not detect serial number. Please try again or enter manually.')),
+          );
+        }
+      }
+    }
+  }
+
   Future<void> _submit() async {
     final selectedType = ref.read(selectedCreationTypeProvider);
     if (selectedType == null) {
@@ -170,6 +211,7 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
     final selectedType = ref.watch(selectedCreationTypeProvider);
     final activeDeskId = ref.watch(activeDeskProvider);
     final isInspectorOpen = ref.watch(inspectorStateProvider);
+    final isScanning = ref.watch(isScanningProvider);
 
     // ADAPTIVE POSITIONING for FORM PANEL
     final double inspectorPanelWidth = screenSize.width * 0.4;
@@ -239,43 +281,6 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
       height: screenSize.height,
       child: Stack(
         children: [
-          // LEFT SIDE: "VERY BIG" Confirmation Button (FLUSH MARGIN)
-          Positioned(
-            left: sideMargin,
-            top: (screenSize.height - buttonHeight) / 2,
-            child: Material(
-              color: const Color(0xFF00E676), // Carbon Mint
-              borderRadius: BorderRadius.zero, 
-              child: InkWell(
-                onTap: (_capacityErrorMessage != null || _isCheckingCapacity) ? null : _submit,
-                child: SizedBox(
-                  width: buttonWidth, 
-                  height: buttonHeight, 
-                  child: Center(
-                    child: _isCheckingCapacity 
-                      ? SizedBox(
-                          width: 32 * scaleFactor,
-                          height: 32 * scaleFactor,
-                          child: const CircularProgressIndicator(strokeWidth: 4, color: Colors.white),
-                        )
-                      : RotatedBox(
-                          quarterTurns: 3,
-                          child: Text(
-                            'Create',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 4,
-                              fontSize: 32 * scaleFactor, 
-                            ),
-                          ),
-                        ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-
           // THE FORM PANEL (ADAPTIVE POSITIONING)
           AnimatedPositioned(
             duration: const Duration(milliseconds: 400),
@@ -319,14 +324,28 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
                                         TextFormField(
                                           controller: _dntsSerialController,
                                           style: TextStyle(fontSize: 14 * scaleFactor),
-                                          decoration: inputDecoration.copyWith(labelText: 'DNTS Serial'),
+                                          decoration: inputDecoration.copyWith(
+                                            labelText: isScanning ? 'Scanning...' : 'DNTS Serial',
+                                            suffixIcon: IconButton(
+                                              icon: Icon(Icons.camera_alt, size: 20 * scaleFactor),
+                                              onPressed: isScanning ? null : () => _startScanning(_dntsSerialController),
+                                              tooltip: 'Scan DNTS Sticker',
+                                            ),
+                                          ),
                                           validator: (value) => value == null || value.isEmpty ? 'Required' : null,
                                         ),
                                         SizedBox(height: scaledSpacing),
                                         TextFormField(
                                           controller: _mfgSerialController,
                                           style: TextStyle(fontSize: 14 * scaleFactor),
-                                          decoration: inputDecoration.copyWith(labelText: 'Mfg Serial'),
+                                          decoration: inputDecoration.copyWith(
+                                            labelText: isScanning ? 'Scanning...' : 'Mfg Serial',
+                                            suffixIcon: IconButton(
+                                              icon: Icon(Icons.camera_alt, size: 20 * scaleFactor),
+                                              onPressed: isScanning ? null : () => _startScanning(_mfgSerialController),
+                                              tooltip: 'Scan Serial Number',
+                                            ),
+                                          ),
                                           validator: (value) => value == null || value.isEmpty ? 'Required' : null,
                                         ),
                                       ],
@@ -440,6 +459,46 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
                         ),
                       ),
                   ],
+                ),
+              ),
+            ),
+          ),
+
+          // DYNAMIC POSITIONING: Attach to the left edge of the form panel (Overlaying it)
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeInOutCubic,
+            right: panelRightPosition + panelWidth - (8 * scaleFactor), // Overlap by 8px
+            top: (screenSize.height - buttonHeight) / 2,
+            child: Material(
+              color: const Color(0xFF00E676), // Carbon Mint
+              borderRadius: BorderRadius.zero, 
+              elevation: 8, // Give it its own shadow to pop over the panel
+              child: InkWell(
+                onTap: (_capacityErrorMessage != null || _isCheckingCapacity) ? null : _submit,
+                child: SizedBox(
+                  width: buttonWidth, 
+                  height: buttonHeight, 
+                  child: Center(
+                    child: _isCheckingCapacity 
+                      ? SizedBox(
+                          width: 32 * scaleFactor,
+                          height: 32 * scaleFactor,
+                          child: const CircularProgressIndicator(strokeWidth: 4, color: Colors.white),
+                        )
+                      : RotatedBox(
+                          quarterTurns: 3,
+                          child: Text(
+                            'Create',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 4,
+                              fontSize: 32 * scaleFactor, 
+                            ),
+                          ),
+                        ),
+                  ),
                 ),
               ),
             ),

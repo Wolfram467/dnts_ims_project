@@ -1,4 +1,3 @@
-import 'dart:js_interop';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,10 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/auth_screen.dart';
 import 'screens/bootstrap_screen.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'providers/theme_provider.dart';
 
-@JS('removeDNTSSplash')
-external void removeDNTSSplash();
+// Conditionally import the splash handler
+import 'utils/splash_handler_stub.dart' if (dart.library.js_interop) 'utils/splash_handler_web.dart';
 
 void main() {
   // 1. Instant Engine Initialization
@@ -35,6 +35,7 @@ void main() {
 /// Orchestrates the background connection to Supabase and Local Storage
 Future<void> _initializeServices() async {
   await Future.wait([
+    dotenv.load(fileName: ".env"),
     Supabase.initialize(
       url: 'https://wycbnxuhzemgkfebzfmz.supabase.co',
       anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5Y2JueHVoemVtZ2tmZWJ6Zm16Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5MDE2MzgsImV4cCI6MjA5MjQ3NzYzOH0.Df5rENWQ8_xwd6tNQG4x68sAR_MxZMqb7tsJPDnGoKA',
@@ -62,7 +63,7 @@ class AppInitializer extends ConsumerWidget {
         if (snapshot.connectionState == ConnectionState.done) {
           // Trigger the native HTML splash removal
           if (kIsWeb) {
-            removeDNTSSplash();
+            handleSplashRemoval();
           }
           return const DNTSApp();
         }

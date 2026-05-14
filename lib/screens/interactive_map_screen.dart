@@ -49,7 +49,10 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
     final selectedFacility = ref.watch(selectedFacilityProvider);
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
+      backgroundColor: Colors.transparent, // Ensure it doesn't block backgrounds if needed
       body: Stack(
+        clipBehavior: Clip.none, // ALLOW OVERFLOW to overlay the NavigationRail
         children: [
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -72,10 +75,6 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
           // GLOBAL OVERLAYS (Ordered back-to-front)
           // Only the Inspector and Drag Ghost overlay the header
           const InspectorPanelWidget(),
-          
-          // CREATE COMPONENT PANEL (Conditional Overlay)
-          if (ref.watch(isCreationModeProvider))
-            const CreateComponentPanel(),
 
           // PERFORMANCE: Ghost overlay is its own widget to isolate rebuilds
           const GlobalDragGhostOverlay(),

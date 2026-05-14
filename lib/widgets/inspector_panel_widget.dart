@@ -133,7 +133,7 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
 
         // Row 4: AVR (1x Height)
         Expanded(flex: 1, child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'AVR', scaleFactor)),
-        SizedBox(height: 24 * scaleFactor),
+        SizedBox(height: gap),
 
         // Close Button
         _buildPanelCloseButton(scaleFactor),
