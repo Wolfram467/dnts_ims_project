@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/map_state_provider.dart';
+import '../providers/repository_providers.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/admin_dialog.dart';
 import '../widgets/settings_dialog.dart';
 import '../widgets/create_component_panel.dart';
+import '../models/hardware_component.dart';
 import 'auth_screen.dart';
 import 'dashboard_screen.dart';
 import 'interactive_map_screen.dart';
@@ -87,7 +89,7 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
       case 0:
         return const DashboardScreen();
       case 1:
-        return InteractiveMapScreen(userRole: _userRole ?? 'viewer');
+        return InteractiveMapScreen(userRole: _userRole ?? 'lab_ta');
       default:
         return const Center(
           child: Text(
@@ -102,6 +104,45 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
     }
   }
 
+  Future<void> _submitCreation() async {
+    final formKey = ref.read(creationFormKeyProvider);
+    if (formKey.currentState?.validate() != true) return;
+    
+    final draft = ref.read(draftComponentProvider);
+    final selectedType = ref.read(selectedCreationTypeProvider);
+    final location = ref.read(activeDeskProvider);
+    final capacityError = ref.read(creationCapacityErrorProvider);
+    final isChecking = ref.read(isCheckingCapacityProvider);
+
+    if (selectedType == null || location == null) return;
+    if (capacityError != null || isChecking) return;
+
+    final newComponent = HardwareComponent(
+      category: selectedType,
+      dntsSerial: draft['dnts']?.trim() ?? '',
+      mfgSerial: draft['mfg']?.trim() ?? '',
+      brand: draft['brand']?.trim() ?? '',
+      dateAcquired: (draft['date']?.trim().isEmpty ?? true) ? null : draft['date']!.trim(),
+      status: location == 'Storage' ? 'Storage' : 'Deployed',
+    );
+
+    final inventoryManager = ref.read(inventoryManagerProvider);
+    final result = await inventoryManager.createComponent(location, newComponent);
+
+    result.fold(
+      (success) {
+        ref.read(draftComponentProvider.notifier).state = {};
+        ref.read(refreshTriggerProvider.notifier).state++;
+        ref.invalidate(activeDeskComponentsProvider);
+        ref.read(isCreationModeProvider.notifier).state = false;
+        ref.read(selectedCreationTypeProvider.notifier).state = null;
+      },
+      (failure) {
+        ref.read(creationCapacityErrorProvider.notifier).state = failure.toString().replaceAll('Exception: ', '');
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -110,9 +151,7 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
       );
     }
 
-    final currentUser = Supabase.instance.client.auth.currentUser;
-    final userEmail = currentUser?.email?.toUpperCase() ?? '';
-    final isAdmin = userEmail == 'DNTS25-2002573@DNTS.LOCAL';
+    final isAdmin = _userRole == 'ta_admin' || _userRole == 'dnts_head';
     final isCreationMode = ref.watch(isCreationModeProvider);
 
     return Scaffold(
@@ -266,10 +305,36 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
             ],
           ),
           
-          // GLOBAL CREATION PANEL OVERLAY (Covers Navigation Rail)
+          // PINNED CREATION BUTTON
           if (isCreationMode)
-            Positioned.fill(
-              child: CreateComponentPanel(),
+            Positioned(
+              left: 57, // Flush against Navigation Rail + Divider
+              top: (MediaQuery.of(context).size.height - 400) / 2,
+              child: Material(
+                color: const Color(0xFF00E676), // Carbon Mint
+                elevation: 4,
+                child: InkWell(
+                  onTap: _submitCreation,
+                  child: const SizedBox(
+                    width: 60,
+                    height: 400,
+                    child: Center(
+                      child: RotatedBox(
+                        quarterTurns: 3,
+                        child: Text(
+                          'Create',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 4,
+                            fontSize: 24,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
         ],
       ),

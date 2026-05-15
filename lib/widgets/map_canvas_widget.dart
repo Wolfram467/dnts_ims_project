@@ -596,6 +596,21 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     );
   }
 
+  Widget _buildCreationFormOverlay(String deskId) {
+    final config = _workstationConfigs.firstWhere((c) => c.id == deskId, orElse: () => const WorkstationConfig(id: '', dx: 0, dy: 0));
+    if (config.id.isEmpty) return const SizedBox.shrink();
+
+    const double offset = 2.0 * gridCellSizePixels;
+    
+    return Positioned(
+      left: (config.dx * gridCellSizePixels) - offset,
+      top: (config.dy * gridCellSizePixels) - offset,
+      width: gridCellSizePixels,
+      height: gridCellSizePixels,
+      child: CreateComponentPanel(initialLocation: deskId),
+    );
+  }
+
   Widget _buildKeyboardShortcutHelpEntry(String key, String desc) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -759,9 +774,18 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
                       child: ValueListenableBuilder<Matrix4>(
                         valueListenable: _transformationController,
                         builder: (context, matrix, child) {
+                          final isCreationMode = ref.watch(isCreationModeProvider);
+                          final activeId = ref.watch(activeDeskProvider);
+                          
                           return Transform(
                             transform: matrix,
-                            child: child,
+                            child: Stack(
+                              children: [
+                                child!,
+                                if (isCreationMode && activeId != null)
+                                  _buildCreationFormOverlay(activeId),
+                              ],
+                            ),
                           );
                         },
                         child: RepaintBoundary(

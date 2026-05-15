@@ -85,6 +85,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
+  String _getRoleLabel(String role) {
+    switch (role) {
+      case 'ta_admin':
+      case 'dnts_head':
+        return 'TA ADMIN';
+      case 'lab_ta':
+        return 'TA EDITOR';
+      default:
+        return role.toUpperCase();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -108,17 +120,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ),
                 child: DataTable(
                   columns: const [
+                    DataColumn(label: Text('TA NAME')),
                     DataColumn(label: Text('DNTS EMAIL')),
                     DataColumn(label: Text('ROLE')),
                     DataColumn(label: Text('ACTIONS')),
                   ],
                   rows: _accounts.map((account) {
                     final String id = account['id']?.toString() ?? '';
+                    final String name = account['full_name']?.toString() ?? 'N/A';
                     final String email = account['email']?.toString().toUpperCase() ?? 'N/A';
-                    final String role = account['role']?.toString().toUpperCase() ?? 'N/A';
+                    final String role = _getRoleLabel(account['role']?.toString() ?? '');
                     
                     return DataRow(
                       cells: [
+                        DataCell(Text(name)),
                         DataCell(Text(email)),
                         DataCell(Text(role)),
                         DataCell(

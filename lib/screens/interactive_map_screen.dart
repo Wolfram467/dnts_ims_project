@@ -174,6 +174,41 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
+              // Comparison / Analyze Tab Toggle
+              InkWell(
+                onTap: () {
+                  final dockNotifier = ref.read(dockProvider.notifier);
+                  final currentView = ref.read(dockProvider).viewMode;
+                  final isCurrentlyExpanded = ref.read(dockProvider).isExpanded;
+
+                  if (isCurrentlyExpanded && currentView == DockViewMode.comparison) {
+                    dockNotifier.setExpanded(false);
+                  } else {
+                    ref.read(historyPanelProvider.notifier).close();
+                    dockNotifier.setViewMode(DockViewMode.comparison);
+                  }
+                },
+                mouseCursor: SystemMouseCursors.click,
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: isDockExpanded && ref.watch(dockProvider).viewMode == DockViewMode.comparison
+                        ? Theme.of(context).colorScheme.onSurface 
+                        : Theme.of(context).colorScheme.surface,
+                    border: Border.all(color: Theme.of(context).colorScheme.onSurface, width: 1),
+                  ),
+                  child: Icon(
+                    isDockExpanded && ref.watch(dockProvider).viewMode == DockViewMode.comparison
+                        ? Icons.close 
+                        : Icons.compare_arrows,
+                    color: isDockExpanded && ref.watch(dockProvider).viewMode == DockViewMode.comparison
+                        ? Theme.of(context).colorScheme.surface 
+                        : Theme.of(context).colorScheme.onSurface,
+                    size: isCompact ? 20 : 24,
+                  ),
+                ),
+              ),
               const SizedBox(width: 24),
               Text(
                 'Inventory Management System',

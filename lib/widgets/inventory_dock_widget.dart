@@ -7,6 +7,8 @@ import '../providers/repository_providers.dart';
 import '../models/hardware_component.dart';
 import '../services/pdf_report_service.dart';
 import '../domain/print_settings.dart';
+import '../providers/auth_provider.dart';
+import 'inventory_comparison_widget.dart';
 
 /// A modular, left-aligned sidebar for inventory management and audit.
 /// Redesigned from a bottom dock to a sidebar for layout consistency.
@@ -55,7 +57,9 @@ class InventoryDockWidget extends ConsumerWidget {
             return Column(
               children: [
                 _buildSidebarHeader(context, ref, selectedFacility, groupedComponents),
-                Expanded(child: _buildAuditView(context, ref, groupedComponents)),
+                Expanded(
+                  child: _buildMainContent(context, ref, dockState, groupedComponents),
+                ),
               ],
             );
           },
@@ -66,8 +70,23 @@ class InventoryDockWidget extends ConsumerWidget {
     );
   }
 
+  Widget _buildMainContent(
+    BuildContext context, 
+    WidgetRef ref, 
+    DockState dockState,
+    Map<String, Map<String, List<Map<String, dynamic>>>> groupedComponents
+  ) {
+    switch (dockState.viewMode) {
+      case DockViewMode.comparison:
+        return const InventoryComparisonWidget();
+      case DockViewMode.inventory:
+      case DockViewMode.audit:
+      default:
+        return _buildAuditView(context, ref, groupedComponents);
+    }
+  }
+
   Map<String, Map<String, List<Map<String, dynamic>>>> _groupInventory(List<Map<String, dynamic>> inventory) {
-// ... (rest of the method unchanged)
     final Map<String, Map<String, List<Map<String, dynamic>>>> result = {};
     for (final item in inventory) {
       final deskId = item['location']?['name'] as String? ?? 'Unknown';
@@ -120,7 +139,6 @@ class InventoryDockWidget extends ConsumerWidget {
   }
 
   void _showPrintSettingsDialog(
-// ... (rest of the method unchanged)
     BuildContext context, 
     WidgetRef ref, 
     String selectedFacility,
@@ -134,10 +152,13 @@ class InventoryDockWidget extends ConsumerWidget {
         : '${now.year - 1}-${now.year}';
     final dateUpdated = DateFormat('M/d/yyyy').format(now);
 
+    // Auto-populate TA Name from Profile
+    final userProfile = ref.read(userProfileProvider).value;
+
     final academicYearController = TextEditingController(text: academicYear);
-    final shiftTypeController = TextEditingController();
+    final shiftTypeController = TextEditingController(text: 'AM SHIFT');
     final dateUpdatedController = TextEditingController(text: dateUpdated);
-    final taAssignedController = TextEditingController();
+    final taAssignedController = TextEditingController(text: userProfile?.fullName ?? '');
 
     showDialog(
       context: context,

@@ -618,17 +618,17 @@ This document defines the PostgreSQL database schema for the DNTS Inventory Mana
 
 ---
 
-## Tables
+* `user_role`: `['ta_admin', 'lab_ta']`
 
 ### 1. `profiles`
-Manages system access. New users default to a 'viewer' role but cannot view data until `is_approved` is true.
+Manages system access. New accounts are created and pre-approved by a TA Admin.
 
 | Column Name | Data Type | Constraints / Notes |
 | :--- | :--- | :--- |
 | `id` | `uuid` | Primary Key, Foreign Key to `auth.users.id` |
 | `full_name` | `text` | Not Null |
-| `role` | `user_role` | Default: 'viewer' |
-| `is_approved` | `boolean` | Default: false (DNTS Head must approve) |
+| `role` | `user_role` | Default: 'lab_ta' |
+| `is_approved` | `boolean` | Default: true (Admin-created accounts are ready for use) |
 | `assigned_lab` | `text` | Nullable (e.g., 'Lab 6') |
 
 ### 2. `locations`

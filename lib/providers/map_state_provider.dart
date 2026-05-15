@@ -391,3 +391,12 @@ final selectedCreationTypeProvider = StateProvider<String?>((ref) => null);
 
 /// Persists the draft inputs of the component creation form during location picking.
 final draftComponentProvider = StateProvider<Map<String, String>>((ref) => {});
+
+/// Provider for the creation form key to allow external submission triggering.
+final creationFormKeyProvider = Provider((ref) => GlobalKey<FormState>());
+
+/// Tracks capacity validation errors for the creation panel.
+final creationCapacityErrorProvider = StateProvider<String?>((ref) => null);
+
+/// Tracks whether capacity is currently being checked.
+final isCheckingCapacityProvider = StateProvider<bool>((ref) => false);

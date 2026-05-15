@@ -4,6 +4,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/theme_provider.dart';
 import '../screens/auth_screen.dart';
 
+import '../providers/auth_provider.dart';
+
 class SettingsDialog extends ConsumerWidget {
   const SettingsDialog({super.key});
 
@@ -20,6 +22,7 @@ class SettingsDialog extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = Supabase.instance.client.auth.currentUser;
+    final userProfileAsync = ref.watch(userProfileProvider);
     final isDarkMode = ref.watch(themeProvider);
     final bool isCompact = MediaQuery.of(context).size.width < 600;
 
@@ -69,51 +72,66 @@ class SettingsDialog extends ConsumerWidget {
                       // Profile Section
                       Padding(
                         padding: const EdgeInsets.all(24.0),
-                        child: Column(
-                          children: [
-                            Container(
-                              width: 64,
-                              height: 64,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(color: Theme.of(context).dividerColor, width: 1),
-                                color: Theme.of(context).colorScheme.surface,
-                              ),
-                              child: const Icon(Icons.person_outline, size: 32),
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              'Hi, ${user?.email?.split('@').first ?? 'User'}',
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w300,
-                              ),
-                            ),
-                            Text(
-                              user?.email?.replaceAll('@dnts.local', '') ?? '',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            OutlinedButton(
-                              onPressed: () {},
-                              style: OutlinedButton.styleFrom(
-                                side: BorderSide(color: Theme.of(context).dividerColor),
-                                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                              ),
-                              child: const Text(
-                                'MANAGE ACCOUNT',
-                                style: TextStyle(
-                                  letterSpacing: 1,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
+                        child: userProfileAsync.when(
+                          data: (profile) {
+                            final fullName = profile?.fullName ?? 'Technical Assistant';
+                            final taId = (user?.email?.split('@').first ?? 'UNKNOWN').toUpperCase();
+                            
+                            return Column(
+                              children: [
+                                Container(
+                                  width: 64,
+                                  height: 64,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: Theme.of(context).dividerColor, width: 1),
+                                    color: Theme.of(context).colorScheme.surface,
+                                  ),
+                                  child: const Icon(Icons.person_outline, size: 32),
                                 ),
-                              ),
-                            ),
-                          ],
+                                const SizedBox(height: 16),
+                                Text(
+                                  'Hi, $fullName',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w300,
+                                  ),
+                                ),
+                                Text(
+                                  taId,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 1.2,
+                                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                OutlinedButton(
+                                  onPressed: () {},
+                                  style: OutlinedButton.styleFrom(
+                                    side: BorderSide(color: Theme.of(context).dividerColor),
+                                    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                  ),
+                                  child: const Text(
+                                    'MANAGE ACCOUNT',
+                                    style: TextStyle(
+                                      letterSpacing: 1,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                          loading: () => const Center(child: Padding(
+                            padding: EdgeInsets.all(20.0),
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )),
+                          error: (_, __) => const Text('Error loading profile'),
                         ),
                       ),
                       const Divider(height: 1),

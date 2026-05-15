@@ -250,7 +250,7 @@ class _InventoryMasterScreenState extends State<InventoryMasterScreen> {
     return status == 'Deployed' ? FontWeight.w600 : FontWeight.normal;
   }
 
-  bool get _canEdit => widget.userRole == 'dnts_head' || widget.userRole == 'lab_ta';
+  bool get _canEdit => widget.userRole == 'ta_admin' || widget.userRole == 'lab_ta';
 
   @override
   Widget build(BuildContext context) {

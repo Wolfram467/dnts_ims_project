@@ -33,10 +33,10 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
 
       setState(() {
         _pendingUsers = List<Map<String, dynamic>>.from(response);
-        // Initialize selected roles to 'viewer' for each user
+        // Initialize selected roles to 'lab_ta' for each user
         for (var user in _pendingUsers) {
           final userId = user['id'];
-          _selectedRoles[userId] ??= 'viewer';
+          _selectedRoles[userId] ??= 'lab_ta';
         }
         _isLoading = false;
       });
@@ -89,12 +89,11 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
 
   String _getRoleLabel(String role) {
     switch (role) {
+      case 'ta_admin':
       case 'dnts_head':
-        return 'Supreme Leader';
+        return 'TA Admin';
       case 'lab_ta':
-        return 'Editor';
-      case 'viewer':
-        return 'Viewer';
+        return 'TA Editor';
       default:
         return role;
     }
@@ -166,7 +165,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
                               final user = _pendingUsers[index];
                               final fullName = user['full_name'] ?? 'Unknown';
                               final userId = user['id'];
-                              final selectedRole = _selectedRoles[userId] ?? 'viewer';
+                              final selectedRole = _selectedRoles[userId] ?? 'lab_ta';
 
                               return Container(
                                 padding: const EdgeInsets.all(16),
@@ -226,12 +225,12 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
                                         ),
                                         items: const [
                                           DropdownMenuItem(
-                                            value: 'viewer',
-                                            child: Text('Viewer'),
+                                            value: 'lab_ta',
+                                            child: Text('TA Editor'),
                                           ),
                                           DropdownMenuItem(
-                                            value: 'lab_ta',
-                                            child: Text('Editor'),
+                                            value: 'ta_admin',
+                                            child: Text('TA Admin'),
                                           ),
                                         ],
                                         onChanged: (value) {
