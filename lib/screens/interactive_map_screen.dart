@@ -126,7 +126,6 @@ class _InteractiveMapScreenState extends ConsumerState<InteractiveMapScreen> {
                   }
                   ref.read(dockProvider.notifier).toggleExpanded();
                   ref.read(refreshTriggerProvider.notifier).state++;
-                  ref.read(cameraControlProvider.notifier).fitAllLabs();
                 },
                 mouseCursor: SystemMouseCursors.click,
                 child: Container(

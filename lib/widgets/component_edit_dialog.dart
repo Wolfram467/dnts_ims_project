@@ -132,13 +132,13 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
       ref.read(isScanningProvider.notifier).state = true;
       final scannerService = ref.read(serialScannerServiceProvider);
       
-      final result = await scannerService.extractSerialNumber(imagePath);
+      final result = await scannerService.extractData(imagePath);
       
       if (mounted) {
         ref.read(isScanningProvider.notifier).state = false;
-        if (result != null) {
+        if (result != null && result['mfg_serial'] != null && result['mfg_serial']!.isNotEmpty) {
           setState(() {
-            _manufacturingSerialNumberController.text = result;
+            _manufacturingSerialNumberController.text = result['mfg_serial']!;
           });
         } else {
           SystemSound.play(SystemSoundType.alert);
@@ -184,7 +184,7 @@ class _ComponentEditDialogState extends ConsumerState<ComponentEditDialog> {
     // Save to storage
     final wasUpdateSuccessful = await ref.read(workstationRepositoryProvider).updateWorkstationComponent(
       widget.workstationIdentifier,
-      widget.component.category,
+      widget.component.dntsSerial,
       updatedComponent,
     );
 

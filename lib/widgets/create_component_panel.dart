@@ -6,6 +6,7 @@ import '../models/hardware_component.dart';
 import '../providers/repository_providers.dart';
 import '../providers/map_state_provider.dart';
 import '../providers/service_providers.dart';
+import '../services/serial_scanner_service.dart';
 import 'serial_scanner_overlay.dart';
 
 class CreateComponentPanel extends ConsumerStatefulWidget {
@@ -13,7 +14,8 @@ class CreateComponentPanel extends ConsumerStatefulWidget {
   const CreateComponentPanel({super.key, this.initialLocation});
 
   @override
-  ConsumerState<CreateComponentPanel> createState() => _CreateComponentPanelState();
+  ConsumerState<CreateComponentPanel> createState() =>
+      _CreateComponentPanelState();
 }
 
 class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
@@ -28,11 +30,16 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
   bool _isCheckingCapacity = false;
   String? _capacityErrorMessage;
 
+  bool _isDntsSerialAiGenerated = false;
+  bool _isMfgSerialAiGenerated = false;
+  bool _isBrandAiGenerated = false;
+
   @override
   void initState() {
     super.initState();
-    _selectedLocation = widget.initialLocation ?? ref.read(activeDeskProvider) ?? 'Storage';
-    
+    _selectedLocation =
+        widget.initialLocation ?? ref.read(activeDeskProvider) ?? 'Storage';
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final draft = ref.read(draftComponentProvider);
       if (draft.isNotEmpty) {
@@ -59,11 +66,16 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
   }
 
   void _autoFillDntsSerial(String? type) {
-    if (_selectedLocation == null || _selectedLocation == 'Storage' || type == null) {
+    if (_selectedLocation == null ||
+        _selectedLocation == 'Storage' ||
+        type == null) {
       return;
     }
 
-    final match = RegExp(r'L(?:ab)?(\d+)_[a-zA-Z]*(\d+)', caseSensitive: false).firstMatch(_selectedLocation!);
+    final match = RegExp(
+      r'L(?:ab)?(\d+)_[a-zA-Z]*(\d+)',
+      caseSensitive: false,
+    ).firstMatch(_selectedLocation!);
     if (match == null) return;
 
     final labNumber = match.group(1);
@@ -72,6 +84,8 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
     String categoryAbbr = '';
     switch (type) {
       case 'Monitor': categoryAbbr = 'MR'; break;
+      case 'Monitor 1': categoryAbbr = 'MR1_'; break;
+      case 'Monitor 2': categoryAbbr = 'MR2_'; break;
       case 'Mouse': categoryAbbr = 'M'; break;
       case 'Keyboard': categoryAbbr = 'K'; break;
       case 'System Unit': categoryAbbr = 'SU'; break;
@@ -99,25 +113,39 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
     });
 
     final inventoryManager = ref.read(inventoryManagerProvider);
-    final result = await inventoryManager.validateCapacity(_selectedLocation!, selectedType);
+    final result = await inventoryManager.validateCapacity(
+      _selectedLocation!,
+      selectedType,
+    );
 
     if (mounted) {
       setState(() {
         _isCheckingCapacity = false;
         result.fold(
-          (success) { _capacityErrorMessage = null; },
-          (failure) { _capacityErrorMessage = failure.toString().replaceAll('Exception: ', ''); },
+          (success) {
+            _capacityErrorMessage = null;
+          },
+          (failure) {
+            _capacityErrorMessage = failure.toString().replaceAll(
+              'Exception: ',
+              '',
+            );
+          },
         );
       });
     }
   }
 
-  Future<void> _startScanning(TextEditingController targetController) async {
+  Future<void> _startScanning(TextEditingController targetController, ScanType scanType) async {
     final status = await Permission.camera.request();
     if (!status.isGranted) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Camera permission is required to scan serial numbers')),
+          const SnackBar(
+            content: Text(
+              'Camera permission is required to scan serial numbers',
+            ),
+          ),
         );
       }
       return;
@@ -130,19 +158,48 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
     if (imagePath != null && mounted) {
       ref.read(isScanningProvider.notifier).state = true;
       final scannerService = ref.read(serialScannerServiceProvider);
-      
-      final result = await scannerService.extractSerialNumber(imagePath);
-      
+
+      final result = await scannerService.extractData(imagePath, scanType: scanType);
+
       if (mounted) {
         ref.read(isScanningProvider.notifier).state = false;
         if (result != null) {
           setState(() {
-            targetController.text = result;
+            // 1. Handle DNTS Serial (Check both scan types since a label might have both)
+            if (result.containsKey('dnts_serial') && result['dnts_serial'] != 'NOT_FOUND') {
+              _dntsSerialController.text = result['dnts_serial']!;
+              _isDntsSerialAiGenerated = true;
+            }
+
+            // 2. Handle Manufacturer Specific Data
+            if (scanType == ScanType.manufacturer) {
+              if (result.containsKey('mfg_serial') && result['mfg_serial'] != 'NOT_FOUND') {
+                _mfgSerialController.text = result['mfg_serial']!;
+                _isMfgSerialAiGenerated = true;
+              }
+              if (result.containsKey('brand') && result['brand']!.isNotEmpty) {
+                _brandController.text = result['brand']!;
+                _isBrandAiGenerated = true;
+              }
+              if (result.containsKey('category') && result['category']!.isNotEmpty) {
+                ref.read(selectedCreationTypeProvider.notifier).state = result['category'];
+              }
+            } else if (scanType == ScanType.dnts) {
+              // If we specifically scanned a DNTS sticker but it also found mfg info
+              if (result.containsKey('mfg_serial') && result['mfg_serial'] != 'NOT_FOUND' && _mfgSerialController.text.isEmpty) {
+                _mfgSerialController.text = result['mfg_serial']!;
+                _isMfgSerialAiGenerated = true;
+              }
+            }
           });
         } else {
           SystemSound.play(SystemSoundType.alert);
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not detect serial number. Please try again or enter manually.')),
+            const SnackBar(
+              content: Text(
+                'Could not detect serial number. Please try again or enter manually.',
+              ),
+            ),
           );
         }
       }
@@ -152,7 +209,9 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
   Future<void> _submit() async {
     final selectedType = ref.read(selectedCreationTypeProvider);
     if (selectedType == null) {
-      setState(() => _capacityErrorMessage = "Please select a type in the sidebar");
+      setState(
+        () => _capacityErrorMessage = "Please select a type in the sidebar",
+      );
       return;
     }
 
@@ -164,14 +223,19 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
       dntsSerial: _dntsSerialController.text.trim(),
       mfgSerial: _mfgSerialController.text.trim(),
       brand: _brandController.text.trim(),
-      dateAcquired: _dateAcquiredController.text.trim().isEmpty ? null : _dateAcquiredController.text.trim(),
-      status: _selectedLocation == 'Storage' ? 'Storage' : 'Deployed', 
+      dateAcquired: _dateAcquiredController.text.trim().isEmpty
+          ? null
+          : _dateAcquiredController.text.trim(),
+      status: _selectedLocation == 'Storage' ? 'Storage' : 'Deployed',
     );
 
     final inventoryManager = ref.read(inventoryManagerProvider);
     final location = _selectedLocation!;
 
-    final result = await inventoryManager.createComponent(location, newComponent);
+    final result = await inventoryManager.createComponent(
+      location,
+      newComponent,
+    );
 
     if (mounted) {
       result.fold(
@@ -183,7 +247,10 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
         },
         (failure) {
           setState(() {
-            _capacityErrorMessage = failure.toString().replaceAll('Exception: ', '');
+            _capacityErrorMessage = failure.toString().replaceAll(
+              'Exception: ',
+              '',
+            );
           });
         },
       );
@@ -200,7 +267,7 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
   Widget build(BuildContext context) {
     final Size screenSize = MediaQuery.of(context).size;
     final double scaleFactor = (screenSize.height / 800.0).clamp(0.5, 1.2);
-    
+
     final double buttonHeight = 600.0 * scaleFactor;
     final double buttonWidth = 120.0 * scaleFactor;
     final double sideMargin = 60.0 * scaleFactor;
@@ -249,32 +316,63 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
 
     const defaultBorder = OutlineInputBorder(
       borderRadius: BorderRadius.zero,
-      borderSide: BorderSide(color: Colors.black, width: 1),
+      borderSide: BorderSide(color: Color(0xFF4B5563), width: 1), // Muted gray border
     );
 
-    final inputDecoration = InputDecoration(
-      border: defaultBorder,
-      enabledBorder: defaultBorder,
-      focusedBorder: const OutlineInputBorder(
-        borderRadius: BorderRadius.zero,
-        borderSide: BorderSide(color: Colors.black, width: 2),
-      ),
-      errorBorder: const OutlineInputBorder(
-        borderRadius: BorderRadius.zero,
-        borderSide: BorderSide(color: Colors.red, width: 1),
-      ),
-      focusedErrorBorder: const OutlineInputBorder(
-        borderRadius: BorderRadius.zero,
-        borderSide: BorderSide(color: Colors.red, width: 2),
-      ),
-      contentPadding: EdgeInsets.symmetric(
-        horizontal: 16 * scaleFactor, 
-        vertical: 12 * scaleFactor
-      ),
-      filled: true,
-      fillColor: Colors.white,
-      labelStyle: TextStyle(fontSize: 14 * scaleFactor),
+    InputDecoration buildInputDecoration({bool isAiGenerated = false}) {
+      return InputDecoration(
+        border: defaultBorder,
+        enabledBorder: isAiGenerated
+            ? const OutlineInputBorder(
+                borderRadius: BorderRadius.zero,
+                borderSide: BorderSide(color: Color(0xFF00E676), width: 2), // Carbon Mint glow
+              )
+            : defaultBorder,
+        focusedBorder: isAiGenerated
+            ? const OutlineInputBorder(
+                borderRadius: BorderRadius.zero,
+                borderSide: BorderSide(color: Color(0xFF00E676), width: 2),
+              )
+            : const OutlineInputBorder(
+                borderRadius: BorderRadius.zero,
+                borderSide: BorderSide(color: Colors.white, width: 1),
+              ),
+        errorBorder: const OutlineInputBorder(
+          borderRadius: BorderRadius.zero,
+          borderSide: BorderSide(color: Colors.redAccent, width: 1),
+        ),
+        focusedErrorBorder: const OutlineInputBorder(
+          borderRadius: BorderRadius.zero,
+          borderSide: BorderSide(color: Colors.redAccent, width: 2),
+        ),
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: 16 * scaleFactor,
+          vertical: 12 * scaleFactor,
+        ),
+        filled: true,
+        fillColor: isAiGenerated 
+            ? const Color(0xFF00E676).withOpacity(0.05) 
+            : const Color(0xFF1F2937), // Darker than panel background
+        labelStyle: TextStyle(
+          fontSize: 14 * scaleFactor, 
+          color: isAiGenerated ? const Color(0xFF00E676) : const Color(0xFF9CA3AF),
+        ),
+        floatingLabelStyle: TextStyle(
+          color: isAiGenerated ? const Color(0xFF00E676) : Colors.white,
+        ),
+      );
+    }
+
+    final defaultInputDecoration = buildInputDecoration();
+    
+    // Default text style for all text fields
+    final inputTextStyle = TextStyle(
+      fontSize: 14 * scaleFactor,
+      color: Colors.white,
     );
+    
+    // Icon color
+    final iconColor = const Color(0xFF9CA3AF);
 
     return SizedBox(
       width: screenSize.width,
@@ -291,21 +389,37 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
               width: panelWidth,
               height: buttonHeight,
               decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border.all(color: Colors.black, width: 2),
+                color: const Color(0xFF374151), // Deep Anthracite
+                border: Border.all(color: const Color(0xFF1F2937), width: 2),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
+                    color: Colors.black.withOpacity(0.4),
                     blurRadius: 30,
                     offset: const Offset(0, 10),
-                  )
+                  ),
                 ],
               ),
               child: Form(
                 key: _formKey,
                 child: Column(
                   children: [
-                    // Redundant Header Removed
+                    // Header
+                    Container(
+                      padding: EdgeInsets.symmetric(vertical: 16 * scaleFactor),
+                      decoration: const BoxDecoration(
+                        border: Border(bottom: BorderSide(color: Color(0xFF4B5563), width: 1)),
+                      ),
+                      child: Text(
+                        'NEW ${selectedType?.toUpperCase() ?? "COMPONENT"}',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18 * scaleFactor,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 2.0,
+                        ),
+                      ),
+                    ),
                     Expanded(
                       child: Padding(
                         padding: EdgeInsets.all(scaledPadding),
@@ -323,30 +437,72 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
                                       children: [
                                         TextFormField(
                                           controller: _dntsSerialController,
-                                          style: TextStyle(fontSize: 14 * scaleFactor),
-                                          decoration: inputDecoration.copyWith(
-                                            labelText: isScanning ? 'Scanning...' : 'DNTS Serial',
+                                          onChanged: (val) {
+                                            if (_isDntsSerialAiGenerated) {
+                                              setState(() => _isDntsSerialAiGenerated = false);
+                                            }
+                                          },
+                                          style: inputTextStyle,
+                                          decoration: buildInputDecoration(
+                                            isAiGenerated: _isDntsSerialAiGenerated,
+                                          ).copyWith(
+                                            labelText: isScanning
+                                                ? 'Scanning...'
+                                                : 'DNTS Serial',
                                             suffixIcon: IconButton(
-                                              icon: Icon(Icons.camera_alt, size: 20 * scaleFactor),
-                                              onPressed: isScanning ? null : () => _startScanning(_dntsSerialController),
+                                              icon: Icon(
+                                                Icons.camera_alt,
+                                                size: 20 * scaleFactor,
+                                                color: _isDntsSerialAiGenerated ? const Color(0xFF00E676) : iconColor,
+                                              ),
+                                              onPressed: isScanning
+                                                  ? null
+                                                  : () => _startScanning(
+                                                      _dntsSerialController,
+                                                      ScanType.dnts,
+                                                    ),
                                               tooltip: 'Scan DNTS Sticker',
                                             ),
                                           ),
-                                          validator: (value) => value == null || value.isEmpty ? 'Required' : null,
+                                          validator: (value) =>
+                                              value == null || value.isEmpty
+                                              ? 'Required'
+                                              : null,
                                         ),
                                         SizedBox(height: scaledSpacing),
                                         TextFormField(
                                           controller: _mfgSerialController,
-                                          style: TextStyle(fontSize: 14 * scaleFactor),
-                                          decoration: inputDecoration.copyWith(
-                                            labelText: isScanning ? 'Scanning...' : 'Mfg Serial',
+                                          onChanged: (val) {
+                                            if (_isMfgSerialAiGenerated) {
+                                              setState(() => _isMfgSerialAiGenerated = false);
+                                            }
+                                          },
+                                          style: inputTextStyle,
+                                          decoration: buildInputDecoration(
+                                            isAiGenerated: _isMfgSerialAiGenerated,
+                                          ).copyWith(
+                                            labelText: isScanning
+                                                ? 'Scanning...'
+                                                : 'Mfg Serial',
                                             suffixIcon: IconButton(
-                                              icon: Icon(Icons.camera_alt, size: 20 * scaleFactor),
-                                              onPressed: isScanning ? null : () => _startScanning(_mfgSerialController),
+                                              icon: Icon(
+                                                Icons.camera_alt,
+                                                size: 20 * scaleFactor,
+                                                color: _isMfgSerialAiGenerated ? const Color(0xFF00E676) : iconColor,
+                                              ),
+                                              onPressed: isScanning
+                                                  ? null
+                                                  : () => _startScanning(
+                                                      _mfgSerialController,
+                                                      ScanType.manufacturer,
+                                                    ),
                                               tooltip: 'Scan Serial Number',
                                             ),
                                           ),
-                                          validator: (value) => value == null || value.isEmpty ? 'Required' : null,
+                                          validator: (value) =>
+                                              value == null || value.isEmpty
+                                              ? 'Required'
+                                              : null,
                                         ),
                                       ],
                                     ),
@@ -359,29 +515,47 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
                                       children: [
                                         TextFormField(
                                           controller: _brandController,
-                                          style: TextStyle(fontSize: 14 * scaleFactor),
-                                          decoration: inputDecoration.copyWith(labelText: 'Brand'),
-                                          validator: (value) => value == null || value.isEmpty ? 'Required' : null,
+                                          onChanged: (val) {
+                                            if (_isBrandAiGenerated) {
+                                              setState(() => _isBrandAiGenerated = false);
+                                            }
+                                          },
+                                          style: inputTextStyle,
+                                          decoration: buildInputDecoration(
+                                            isAiGenerated: _isBrandAiGenerated,
+                                          ).copyWith(
+                                            labelText: 'Brand',
+                                          ),
+                                          validator: (value) =>
+                                              value == null || value.isEmpty
+                                              ? 'Required'
+                                              : null,
                                         ),
                                         SizedBox(height: scaledSpacing),
                                         TextFormField(
                                           controller: _dateAcquiredController,
-                                          style: TextStyle(fontSize: 14 * scaleFactor),
-                                          decoration: inputDecoration.copyWith(
+                                          style: inputTextStyle,
+                                          decoration: defaultInputDecoration.copyWith(
                                             labelText: 'Date (Optional)',
-                                            suffixIcon: Icon(Icons.calendar_today, size: 18 * scaleFactor),
+                                            suffixIcon: Icon(
+                                              Icons.calendar_today,
+                                              size: 18 * scaleFactor,
+                                              color: iconColor,
+                                            ),
                                           ),
                                           readOnly: true,
                                           onTap: () async {
-                                            final DateTime? picked = await showDatePicker(
-                                              context: context,
-                                              initialDate: DateTime.now(),
-                                              firstDate: DateTime(2000),
-                                              lastDate: DateTime(2101),
-                                            );
+                                            final DateTime? picked =
+                                                await showDatePicker(
+                                                  context: context,
+                                                  initialDate: DateTime.now(),
+                                                  firstDate: DateTime(2000),
+                                                  lastDate: DateTime(2101),
+                                                );
                                             if (picked != null) {
                                               setState(() {
-                                                _dateAcquiredController.text = "${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
+                                                _dateAcquiredController.text =
+                                                    "${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
                                               });
                                             }
                                           },
@@ -392,39 +566,66 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
                                 ],
                               ),
                             ),
-                            
+
                             if (_capacityErrorMessage != null)
                               Padding(
-                                padding: EdgeInsets.symmetric(vertical: scaledSpacing / 2),
+                                padding: EdgeInsets.symmetric(
+                                  vertical: scaledSpacing / 2,
+                                ),
                                 child: Text(
                                   _capacityErrorMessage!,
                                   textAlign: TextAlign.center,
-                                  style: TextStyle(color: Colors.red, fontSize: 11 * scaleFactor),
+                                  style: TextStyle(
+                                    color: Colors.redAccent,
+                                    fontSize: 12 * scaleFactor,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ),
-                              
+
                             TextFormField(
                               key: ValueKey(_selectedLocation),
                               initialValue: _selectedLocation ?? 'None',
-                              style: TextStyle(fontSize: 14 * scaleFactor),
-                              decoration: inputDecoration.copyWith(
+                              style: inputTextStyle,
+                              decoration: defaultInputDecoration.copyWith(
                                 labelText: 'Location',
                                 suffixIcon: InkWell(
                                   onTap: () {
                                     // Save current progress
-                                    ref.read(draftComponentProvider.notifier).state = {
+                                    ref
+                                        .read(draftComponentProvider.notifier)
+                                        .state = {
                                       'dnts': _dntsSerialController.text,
                                       'mfg': _mfgSerialController.text,
                                       'brand': _brandController.text,
                                       'date': _dateAcquiredController.text,
                                     };
-                                    
-                                    ref.read(isLocationPickingModeProvider.notifier).state = true;
-                                    ref.read(isCreationModeProvider.notifier).state = false; // Hide panel while picking
-                                    ref.read(inspectorStateProvider.notifier).closeInspector(); // UNBLOCK MAP
-                                    ref.read(cameraControlProvider.notifier).resetToGlobalOverview();
+
+                                    ref
+                                            .read(
+                                              isLocationPickingModeProvider
+                                                  .notifier,
+                                            )
+                                            .state =
+                                        true;
+                                    ref
+                                            .read(
+                                              isCreationModeProvider.notifier,
+                                            )
+                                            .state =
+                                        false; // Hide panel while picking
+                                    ref
+                                        .read(inspectorStateProvider.notifier)
+                                        .closeInspector(); // UNBLOCK MAP
+                                    ref
+                                        .read(cameraControlProvider.notifier)
+                                        .resetToGlobalOverview();
                                   },
-                                  child: Icon(Icons.map, size: 20 * scaleFactor),
+                                  child: Icon(
+                                    Icons.map,
+                                    size: 20 * scaleFactor,
+                                    color: iconColor,
+                                  ),
                                 ),
                               ),
                               readOnly: true,
@@ -443,16 +644,18 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
                         child: ElevatedButton(
                           onPressed: _closeCreation,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.black,
+                            backgroundColor: const Color(0xFF1F2937),
                             foregroundColor: Colors.white,
-                            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                            shape: const RoundedRectangleBorder(
+                              borderRadius: BorderRadius.zero,
+                            ),
                             elevation: 0,
                           ),
                           child: Text(
                             'CLOSE CREATION',
                             style: TextStyle(
                               fontSize: 16 * scaleFactor,
-                              fontWeight: FontWeight.w500,
+                              fontWeight: FontWeight.bold,
                               letterSpacing: 1.5 * scaleFactor,
                             ),
                           ),
@@ -468,36 +671,44 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
           AnimatedPositioned(
             duration: const Duration(milliseconds: 400),
             curve: Curves.easeInOutCubic,
-            right: panelRightPosition + panelWidth - (8 * scaleFactor), // Overlap by 8px
+            right:
+                panelRightPosition +
+                panelWidth -
+                (8 * scaleFactor), // Overlap by 8px
             top: (screenSize.height - buttonHeight) / 2,
             child: Material(
               color: const Color(0xFF00E676), // Carbon Mint
-              borderRadius: BorderRadius.zero, 
+              borderRadius: BorderRadius.zero,
               elevation: 8, // Give it its own shadow to pop over the panel
               child: InkWell(
-                onTap: (_capacityErrorMessage != null || _isCheckingCapacity) ? null : _submit,
+                onTap: (_capacityErrorMessage != null || _isCheckingCapacity)
+                    ? null
+                    : _submit,
                 child: SizedBox(
-                  width: buttonWidth, 
-                  height: buttonHeight, 
+                  width: buttonWidth,
+                  height: buttonHeight,
                   child: Center(
-                    child: _isCheckingCapacity 
-                      ? SizedBox(
-                          width: 32 * scaleFactor,
-                          height: 32 * scaleFactor,
-                          child: const CircularProgressIndicator(strokeWidth: 4, color: Colors.white),
-                        )
-                      : RotatedBox(
-                          quarterTurns: 3,
-                          child: Text(
-                            'Create',
-                            style: TextStyle(
+                    child: _isCheckingCapacity
+                        ? SizedBox(
+                            width: 32 * scaleFactor,
+                            height: 32 * scaleFactor,
+                            child: const CircularProgressIndicator(
+                              strokeWidth: 4,
                               color: Colors.white,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 4,
-                              fontSize: 32 * scaleFactor, 
+                            ),
+                          )
+                        : RotatedBox(
+                            quarterTurns: 3,
+                            child: Text(
+                              'Create',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 4,
+                                fontSize: 32 * scaleFactor,
+                              ),
                             ),
                           ),
-                        ),
                   ),
                 ),
               ),

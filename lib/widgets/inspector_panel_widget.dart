@@ -22,13 +22,6 @@ class InspectorPanelWidget extends ConsumerStatefulWidget {
 
 class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
   // ═══════════════════════════════════════════════════════════════════════════
-  // CONSTANTS
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /// Inspector panel width as a fraction of screen width (40%)
-  static const double inspectorPanelWidthFraction = 0.4;
-
-  // ═══════════════════════════════════════════════════════════════════════════
   // BUILD
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -116,6 +109,10 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
       ],
     );
 
+    final bool isLab7 = workstationIdentifier.toLowerCase().contains('lab 7') || 
+                        workstationIdentifier.toLowerCase().contains('lab7') || 
+                        workstationIdentifier.toLowerCase().contains('l7');
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -123,8 +120,22 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
         Expanded(flex: 1, child: buildRow1()),
         SizedBox(height: gap),
 
-        // Row 2: Monitor (2x Height)
-        Expanded(flex: 2, child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Monitor', scaleFactor)),
+        // Row 2: Monitor (2x Height) - Split in half for Lab 7
+        if (isLab7)
+          Expanded(
+            flex: 2, 
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Monitor 1', scaleFactor, categoryIndex: 0)),
+                SizedBox(width: gap),
+                Expanded(child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Monitor 2', scaleFactor, categoryIndex: 1)),
+              ],
+            )
+          )
+        else
+          Expanded(flex: 2, child: _buildComponentSlot(context, workstationIdentifier, workstationComponents, 'Monitor', scaleFactor)),
+        
         SizedBox(height: gap),
 
         // Row 3: System Unit with nested SSD (2x Height)
@@ -153,12 +164,27 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
     String targetCategory,
     double scaleFactor, {
     bool isNestedComponent = false,
+    int categoryIndex = 0,
   }) {
     HardwareComponent? foundComponent;
     try {
-      foundComponent = workstationComponents.firstWhere(
-        (component) => component.category.toLowerCase() == targetCategory.toLowerCase(),
-      );
+      // Normalize targetCategory for searching (Monitor 1/2 -> Monitor)
+      String normalizedTarget = targetCategory.toLowerCase();
+      if (normalizedTarget == 'monitor 1' || normalizedTarget == 'monitor 2') {
+        normalizedTarget = 'monitor';
+      }
+
+      final categoryComponents = workstationComponents.where((component) {
+        String existingCategory = component.category.toLowerCase();
+        if (existingCategory == 'monitor 1' || existingCategory == 'monitor 2') {
+          existingCategory = 'monitor';
+        }
+        return existingCategory == normalizedTarget;
+      }).toList();
+      
+      if (categoryComponents.length > categoryIndex) {
+        foundComponent = categoryComponents[categoryIndex];
+      }
     } catch (_) {
       foundComponent = null;
     }
@@ -260,14 +286,15 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
     String workstationIdentifier,
     List<HardwareComponent> workstationComponents,
     String targetCategory,
-    double scaleFactor,
-  ) {
+    double scaleFactor, {
+    int categoryIndex = 0,
+  }) {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF374151), // Deep Anthracite
         border: Border.all(color: Colors.black, width: 1),
       ),
-      child: _buildComponentSlotContent(context, workstationIdentifier, workstationComponents, targetCategory, scaleFactor),
+      child: _buildComponentSlotContent(context, workstationIdentifier, workstationComponents, targetCategory, scaleFactor, categoryIndex: categoryIndex),
     );
   }
 
@@ -278,7 +305,6 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
     List<HardwareComponent> workstationComponents,
     double scaleFactor,
   ) {
-    final double gap = 12.0 * scaleFactor;
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF374151), // Deep Anthracite
@@ -434,27 +460,6 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
         return Colors.grey.shade500; // Not Found
       default:
         return Colors.grey.shade500;
-    }
-  }
-
-  /// Get status badge color (Legacy, kept for compatibility if needed)
-  Color _resolveStatusColor(String? deploymentStatus) {
-    switch (deploymentStatus?.toLowerCase()) {
-      case 'deployed':
-        return const Color(0xFFA7F3D0); // Green
-      case 'under maintenance':
-        return const Color(0xFFFED7AA); // Orange
-      case 'borrowed':
-        return const Color(0xFFBAE6FD); // Blue
-      case 'in storage':
-      case 'storage':
-        return const Color(0xFFE5E7EB); // Gray
-      case 'missing':
-        return const Color(0xFFFECACA); // Red
-      case 'retired':
-        return const Color(0xFFD1D5DB); // Dark gray
-      default:
-        return const Color(0xFFA7F3D0); // Default green
     }
   }
 }

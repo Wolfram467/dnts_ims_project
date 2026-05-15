@@ -134,7 +134,7 @@ class WorkstationRepository {
   /// Update a specific component in a workstation
   Future<bool> updateWorkstationComponent(
     String workstationIdentifier,
-    String componentCategory,
+    String originalDntsSerial,
     HardwareComponent updatedComponent,
   ) async {
     try {
@@ -146,7 +146,7 @@ class WorkstationRepository {
           .from('serialized_assets')
           .select('id')
           .eq('current_loc_id', locationId)
-          .eq('category', componentCategory)
+          .eq('dnts_serial', originalDntsSerial)
           .maybeSingle();
 
       if (response == null) return false;
@@ -201,7 +201,7 @@ class WorkstationRepository {
   /// ============================================================================
 
   /// Delete a specific component from a workstation
-  Future<bool> deleteWorkstationComponent(String workstationIdentifier, String componentCategory) async {
+  Future<bool> deleteWorkstationComponent(String workstationIdentifier, String dntsSerial) async {
     try {
       final locationId = await resolveLocationId(workstationIdentifier);
       if (locationId == null) return false;
@@ -211,7 +211,7 @@ class WorkstationRepository {
           .from('serialized_assets')
           .select('id')
           .eq('current_loc_id', locationId)
-          .eq('category', componentCategory)
+          .eq('dnts_serial', dntsSerial)
           .maybeSingle();
 
       if (response == null) return false;

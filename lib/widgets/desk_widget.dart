@@ -61,7 +61,7 @@ class DeskWidget extends ConsumerWidget {
 
         // 1. Check for missing components (Red)
         // Required categories for a complete PC
-        final requiredCategories = ['System Unit', 'Monitor', 'Keyboard', 'Mouse', 'SSD', 'AVR'];
+        final requiredCategories = ['System Unit', 'Keyboard', 'Mouse', 'SSD', 'AVR'];
         final currentCategories = deskComponents.map((c) => c['category'].toString()).toSet();
         
         bool isMissing = false;
@@ -70,6 +70,11 @@ class DeskWidget extends ConsumerWidget {
             isMissing = true;
             break;
           }
+        }
+
+        // Specifically check for Monitor (Either generic 'Monitor' or 'Monitor 1' must be present)
+        if (!isMissing && !currentCategories.contains('Monitor') && !currentCategories.contains('Monitor 1')) {
+           isMissing = true;
         }
 
         if (isMissing) return Colors.red.shade600;

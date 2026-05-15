@@ -171,46 +171,61 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   // CAMERA LOGIC
   // ═══════════════════════════════════════════════════════════════════════════
 
+  Rect _calculateWorldBoundingRect() {
+    if (_workstationConfigs.isEmpty) return Rect.zero;
+
+    double minX = double.infinity;
+    double maxX = double.negativeInfinity;
+    double minY = double.infinity;
+    double maxY = double.negativeInfinity;
+
+    for (final config in _workstationConfigs) {
+      // Each cell is gridCellSizePixels.
+      // Offset matches the painter's coordinate shift (2.0 cells).
+      const double worldOffsetPixels = 2.0 * gridCellSizePixels;
+      final worldX = (config.dx * gridCellSizePixels) - worldOffsetPixels;
+      final worldY = (config.dy * gridCellSizePixels) - worldOffsetPixels;
+
+      minX = min(minX, worldX);
+      maxX = max(maxX, worldX + gridCellSizePixels);
+      minY = min(minY, worldY);
+      maxY = max(maxY, worldY + gridCellSizePixels);
+    }
+
+    return Rect.fromLTRB(minX, minY, maxX, maxY);
+  }
+
   Matrix4 _calculateGlobalOverviewMatrix() {
-    Size viewportSize;
     final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
-    if (renderBox != null && renderBox.hasSize) {
-      viewportSize = renderBox.size;
-    } else {
-      viewportSize = MediaQuery.sizeOf(context);
+    final Size viewportSize = renderBox?.size ?? MediaQuery.sizeOf(context);
+    
+    final bool isInspectorOpen = ref.read(inspectorStateProvider);
+    final String? activeDeskIdentifier = ref.read(activeDeskProvider);
+
+    // Calculate effective viewport dimensions
+    double effectiveViewportWidthPixels = viewportSize.width;
+    
+    // Account for inspector panel (40% width) on non-compact screens
+    if (isInspectorOpen && activeDeskIdentifier != null && viewportSize.width >= 1100) {
+      final double panelWidthPixels = viewportSize.width * 0.4;
+      effectiveViewportWidthPixels -= panelWidthPixels;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // UNIVERSAL MOBILE BASELINE
-    // Hardcoded to user's exact preferred framing for 915x412 (Landscape)
-    // ═══════════════════════════════════════════════════════════════════════════
-    if (viewportSize.width < 1100) {
-      const double userScale = 0.19405641180156474;
-      _minimumAllowedScale = userScale;
+    final Rect worldBoundingRect = _calculateWorldBoundingRect();
+    if (worldBoundingRect == Rect.zero) return Matrix4.identity();
 
-      return Matrix4.identity()
-        ..translate(93.14321973125783, 14.38255302580356)
-        ..scale(userScale);
-    }
-
-    // DESKTOP DEFAULT VIEW
-    const double canvasWidthPixels = 3200.0;
-    const double canvasHeightPixels = 1700.0;
-
-    final double horizontalScaleFactor = (viewportSize.width - 40) / canvasWidthPixels;
-    final double verticalScaleFactor = (viewportSize.height - 150) / canvasHeightPixels;
-    final double targetScale = min(horizontalScaleFactor, verticalScaleFactor).clamp(0.1, 5.0);
+    const double paddingPixels = 60.0; // Comfort margin
+    final double horizontalScaleFactor = (effectiveViewportWidthPixels - paddingPixels) / worldBoundingRect.width;
+    final double verticalScaleFactor = (viewportSize.height - paddingPixels) / worldBoundingRect.height;
+    
+    // Choose the scale that fits the entire bounding box within the effective viewport
+    final double targetScale = min(horizontalScaleFactor, verticalScaleFactor).clamp(0.01, 5.0);
 
     _minimumAllowedScale = targetScale;
 
-    const double contentCenterHorizontalPixels = canvasWidthPixels / 2;
-    const double contentCenterVerticalPixels = canvasHeightPixels / 2;
-
-    final double viewportCenterHorizontalPixels = viewportSize.width / 2;
-    final double viewportCenterVerticalPixels = viewportSize.height / 2;
-
-    final double translationHorizontalPixels = viewportCenterHorizontalPixels - (contentCenterHorizontalPixels * targetScale);
-    final double translationVerticalPixels = viewportCenterVerticalPixels - (contentCenterVerticalPixels * targetScale);
+    // Calculate translation to center the world bounds in the effective viewport
+    final double translationHorizontalPixels = (effectiveViewportWidthPixels / 2) - (worldBoundingRect.center.dx * targetScale);
+    final double translationVerticalPixels = (viewportSize.height / 2) - (worldBoundingRect.center.dy * targetScale);
 
     return Matrix4.identity()
       ..translate(translationHorizontalPixels, translationVerticalPixels)
@@ -605,20 +620,58 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
 
   @override
   Widget build(BuildContext context) {
-    final isInspectorOpen = ref.watch(inspectorStateProvider);
+    final bool isInspectorOpen = ref.watch(inspectorStateProvider);
+    final Size currentViewportSize = MediaQuery.sizeOf(context);
+
+    // AUTO-REFIT ON RESIZE: 
+    // If the window is resized and we are in Global Overview, re-center the map.
+    if (_viewportSize != currentViewportSize && !_isInitializing) {
+      _viewportSize = currentViewportSize;
+      if (ref.read(activeDeskProvider) == null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _fitAllLabsInView();
+        });
+      }
+    }
 
     ref.listen<CameraAction?>(cameraControlProvider, (previous, next) {
       if (next == null) return;
       switch (next) {
-        case CameraAction.fitAllLabs: _fitAllLabsInView(); break;
-        case CameraAction.zoomIn: _zoomIn(); break;
-        case CameraAction.zoomOut: _zoomOut(); break;
-        case CameraAction.resetToGlobalOverview: resetToGlobalOverview(); break;
+        case CameraAction.fitAllLabs:
+          _fitAllLabsInView();
+          break;
+        case CameraAction.zoomIn:
+          _zoomIn();
+          break;
+        case CameraAction.zoomOut:
+          _zoomOut();
+          break;
+        case CameraAction.resetToGlobalOverview:
+          resetToGlobalOverview();
+          break;
       }
     });
 
+    // RE-CENTER ON PANEL TOGGLE:
+    // When the inspector panel opens or closes, we must re-calculate the 
+    // center of the effective viewport and animate there.
     ref.listen<bool>(inspectorStateProvider, (previous, next) {
-      if (previous == true && next == false) resetToGlobalOverview();
+      if (previous != next) {
+        final String? activeDeskId = ref.read(activeDeskProvider);
+        
+        if (next == true && activeDeskId != null) {
+          // OPENING: Re-focus the active desk in the new effective viewport center (60% area)
+          _animateToWorkstationFocus(activeDeskId);
+        } else if (next == false) {
+          // CLOSING: Return to global overview centered in the full viewport
+          // We don't call resetToGlobalOverview() directly to avoid state update loops
+          _animateCameraTransformation(
+            _transformationController.value, 
+            _calculateGlobalOverviewMatrix(), 
+            iosSlowAnimationDuration,
+          );
+        }
+      }
     });
 
     return _buildInfiniteCanvasView(isInspectorOpen);
@@ -639,23 +692,22 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
       autofocus: true,
       child: Listener(
         onPointerSignal: (signal) {
-          // TEMPORARY: Allow movement even if inspector is open for calibration
+          if (activeId != null) return; // Block scroll zoom if Inspector is open
           if (signal is PointerScrollEvent) _processScrollZoomEvent(signal);
         },
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onScaleStart: (details) {
+            if (activeId != null) return; // Block pan/zoom start if Inspector is open
             _physicsController.stop();
             final translation = _transformationController.value.getTranslation();
             _currentPanOffset = Offset(translation.x, translation.y);
             _baseScale = _transformationController.value.getMaxScaleOnAxis();
           },
           onScaleUpdate: (details) {
-            if (widget.isEditMode) return; // Still block in edit mode
+            if (widget.isEditMode || activeId != null) return; // Block in edit mode or if Inspector is open
             
-            // TEMPORARY: Remove zoom restriction when a desk is being inspected (activeId != null)
-            // to allow for manual framing calibration.
-            final minScale = activeId != null ? 0.05 : (_minimumAllowedScale ?? 0.1);
+            final minScale = _minimumAllowedScale ?? 0.1;
             final targetScale = (_baseScale * details.scale).clamp(minScale, 5.0);
             
             _currentPanOffset += details.focalPointDelta;
@@ -671,7 +723,7 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
             _transformationController.value = Matrix4.identity()..translate(_currentPanOffset.dx, _currentPanOffset.dy)..scale(targetScale);
           },
           onScaleEnd: (details) {
-            if (widget.isEditMode) return; // Still block in edit mode
+            if (widget.isEditMode || activeId != null) return; // Block in edit mode or if Inspector is open
             final velocity = details.velocity.pixelsPerSecond;
             if (velocity.distance < 50.0) {
               CameraStateService.saveCameraState(_transformationController.value);

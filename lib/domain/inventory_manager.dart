@@ -21,11 +21,34 @@ class InventoryManager {
 
     try {
       final components = await _repository.getWorkstationComponents(location);
-      final alreadyHasCategory = components.any(
-        (c) => c.category.toLowerCase() == category.toLowerCase(),
-      );
+      
+      // Normalize internal UI categories (Monitor 1/2) to the database-level category (Monitor)
+      // for consistent validation of the "Swiss Rule" (one category per desk).
+      String normalizedCategory = category.toLowerCase();
+      if (normalizedCategory == 'monitor 1' || normalizedCategory == 'monitor 2') {
+        normalizedCategory = 'monitor';
+      }
 
-      if (alreadyHasCategory) {
+      final categoryCount = components.where((component) {
+        String existingCategory = component.category.toLowerCase();
+        if (existingCategory == 'monitor 1' || existingCategory == 'monitor 2') {
+          existingCategory = 'monitor';
+        }
+        return existingCategory == normalizedCategory;
+      }).length;
+
+      // Max capacity is 1 per normalized category, except for Monitors in Lab 7
+      int maxCapacity = 1;
+      
+      final bool isLab7 = location.toLowerCase().contains('lab 7') || 
+                          location.toLowerCase().contains('lab7') || 
+                          location.toLowerCase().contains('l7');
+                          
+      if (isLab7 && normalizedCategory == 'monitor') {
+        maxCapacity = 2;
+      }
+
+      if (categoryCount >= maxCapacity) {
         return Failure(Exception('Location $location already has a $category.'));
       }
 
@@ -60,12 +83,17 @@ class InventoryManager {
         final locationId = await _repository.resolveLocationId(location);
         
         if (locationId != null) {
+          // Map internal UI categories back to the strict database enum
+          String dbCategory = newComponent.category;
+          if (dbCategory == 'Monitor 1' || dbCategory == 'Monitor 2') {
+            dbCategory = 'Monitor';
+          }
           
           // 2. Insert into remote Supabase serialized_assets table
           await supabase.from('serialized_assets').insert({
             'dnts_serial': newComponent.dntsSerial,
             'mfg_serial': newComponent.mfgSerial,
-            'category': newComponent.category,
+            'category': dbCategory,
             'designated_lab_id': locationId,
             'current_loc_id': locationId,
             'status': newComponent.status, // Must be 'Deployed' or 'Storage'
@@ -136,14 +164,18 @@ class InventoryManager {
       final assetId = componentResponse['id'];
       final previousLocId = componentResponse['current_loc_id'];
 
-      // Check target workstation capacity
-      final targetComponents = await _repository.getWorkstationComponents(toWorkstationId);
-      final alreadyHasCategory = targetComponents.any(
-        (c) => c.category.toLowerCase() == category.toLowerCase(),
+      // Check target workstation capacity using our unified validation method
+      final validationResult = await validateCapacity(toWorkstationId, category);
+      bool isValid = false;
+      Exception? validationError;
+      
+      validationResult.fold(
+        (success) => isValid = true,
+        (failure) => validationError = failure,
       );
 
-      if (alreadyHasCategory) {
-        return Failure(Exception('Target workstation "$toWorkstationId" already has a $category.'));
+      if (!isValid) {
+        return Failure(validationError!);
       }
 
       // 2. Resolve the new location ID
