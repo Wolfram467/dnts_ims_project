@@ -160,7 +160,7 @@ class _ComponentEditPanelState extends ConsumerState<ComponentEditPanel> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'EDIT ${widget.component.category.toUpperCase()}',
+                    widget.component.category.toUpperCase(),
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: 1.5),
                   ),

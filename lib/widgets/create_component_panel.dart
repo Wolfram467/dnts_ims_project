@@ -234,7 +234,7 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
                 children: [
                   // HEADER
                   Text(
-                    'NEW ${selectedType?.toUpperCase() ?? "COMPONENT"}',
+                    selectedType?.toUpperCase() ?? "COMPONENT",
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       color: Colors.white,
