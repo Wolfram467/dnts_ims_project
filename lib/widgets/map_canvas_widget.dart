@@ -13,6 +13,7 @@ import '../utils/keyboard_shortcuts.dart';
 import '../services/camera_state_service.dart';
 import 'inspector_panel_widget.dart';
 import 'create_component_panel.dart';
+import 'component_edit_panel.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PERFORMANCE OPTIMIZATION: CANVAS ENGINE
@@ -276,8 +277,25 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
 
   KeyEventResult _processKeyboardEvent(FocusNode focusNode, KeyEvent keyboardEvent) {
     if (keyboardEvent is! KeyDownEvent) return KeyEventResult.ignored;
+
     final shortcutAction = KeyboardShortcuts.getAction(keyboardEvent);
     if (shortcutAction == null) return KeyEventResult.ignored;
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SHORTCUT PROTECTION LOGIC
+    // ═══════════════════════════════════════════════════════════════════════════
+    // If the canvas does not have Primary Focus (e.g., the user is typing in a 
+    // text field), we must ignore alphanumeric shortcuts (like Lab Jump 1-7) 
+    // to prevent accidental navigation while entering serial numbers.
+    // ═══════════════════════════════════════════════════════════════════════════
+    if (!_keyboardFocusNode.hasPrimaryFocus) {
+      final bool isDigitShortcut = shortcutAction.index >= MapShortcutAction.jumpToLab1.index && 
+                                   shortcutAction.index <= MapShortcutAction.jumpToLab7.index;
+      if (isDigitShortcut) {
+        return KeyEventResult.ignored;
+      }
+    }
+
     _executeKeyboardShortcut(shortcutAction);
     return KeyEventResult.handled;
   }
@@ -611,6 +629,21 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     );
   }
 
+  Widget _buildEditFormOverlay(String deskId, HardwareComponent component) {
+    final config = _workstationConfigs.firstWhere((c) => c.id == deskId, orElse: () => const WorkstationConfig(id: '', dx: 0, dy: 0));
+    if (config.id.isEmpty) return const SizedBox.shrink();
+
+    const double offset = 2.0 * gridCellSizePixels;
+    
+    return Positioned(
+      left: (config.dx * gridCellSizePixels) - offset,
+      top: (config.dy * gridCellSizePixels) - offset,
+      width: gridCellSizePixels,
+      height: gridCellSizePixels,
+      child: ComponentEditPanel(workstationIdentifier: deskId, component: component),
+    );
+  }
+
   Widget _buildKeyboardShortcutHelpEntry(String key, String desc) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -775,6 +808,8 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
                         valueListenable: _transformationController,
                         builder: (context, matrix, child) {
                           final isCreationMode = ref.watch(isCreationModeProvider);
+                          final isEditingMode = ref.watch(isEditingModeProvider);
+                          final editingComponent = ref.watch(editingComponentProvider);
                           final activeId = ref.watch(activeDeskProvider);
                           
                           return Transform(
@@ -784,6 +819,8 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
                                 child!,
                                 if (isCreationMode && activeId != null)
                                   _buildCreationFormOverlay(activeId),
+                                if (isEditingMode && activeId != null && editingComponent != null)
+                                  _buildEditFormOverlay(activeId, editingComponent),
                               ],
                             ),
                           );

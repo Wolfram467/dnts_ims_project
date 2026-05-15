@@ -400,3 +400,9 @@ final creationCapacityErrorProvider = StateProvider<String?>((ref) => null);
 
 /// Tracks whether capacity is currently being checked.
 final isCheckingCapacityProvider = StateProvider<bool>((ref) => false);
+
+/// Tracks whether the application is in "Component Editing Mode" on the map.
+final isEditingModeProvider = StateProvider<bool>((ref) => false);
+
+/// Tracks the component currently being edited on the map.
+final editingComponentProvider = StateProvider<HardwareComponent?>((ref) => null);

@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/map_state_provider.dart';
 import '../providers/repository_providers.dart';
 import '../models/hardware_component.dart';
-import 'component_edit_dialog.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PHASE 3C: INSPECTOR PANEL EXTRACTION
@@ -198,12 +197,18 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
 
     return InkWell(
       onTap: () {
-        if (isCreationMode) {
-          ref.read(selectedCreationTypeProvider.notifier).state = targetCategory;
-        } else if (isComponentFound) {
-          _openComponentEditDialog(context, workstationIdentifier, foundComponent!);
+        if (isComponentFound) {
+          // Switch to Edit Mode, ensure Creation Mode is OFF
+          ref.read(isCreationModeProvider.notifier).state = false;
+          ref.read(selectedCreationTypeProvider.notifier).state = null;
+          
+          ref.read(editingComponentProvider.notifier).state = foundComponent;
+          ref.read(isEditingModeProvider.notifier).state = true;
         } else {
-          // Shortcut: Start creation mode for this type
+          // Switch to Creation Mode, ensure Edit Mode is OFF
+          ref.read(isEditingModeProvider.notifier).state = false;
+          ref.read(editingComponentProvider.notifier).state = null;
+          
           ref.read(isCreationModeProvider.notifier).state = true;
           ref.read(selectedCreationTypeProvider.notifier).state = targetCategory;
         }
@@ -358,20 +363,14 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
     );
   }
 
-  /// Open edit dialog for a component
+  /// Trigger map-based editing for a component
   void _openComponentEditDialog(
     BuildContext context,
     String workstationIdentifier,
     HardwareComponent component,
   ) {
-    showDialog(
-      context: context,
-      builder: (context) => ComponentEditDialog(
-        workstationIdentifier: workstationIdentifier,
-        component: component,
-        onSaved: () => _refreshWorkstationData(workstationIdentifier),
-      ),
-    );
+    ref.read(editingComponentProvider.notifier).state = component;
+    ref.read(isEditingModeProvider.notifier).state = true;
   }
 
   /// Refresh workstation data after edit (handled automatically by Stream)
@@ -385,29 +384,36 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
 
   Widget _buildPanelCloseButton(double scaleFactor) {
     final bool isCreationMode = ref.watch(isCreationModeProvider);
+    final bool isEditingMode = ref.watch(isEditingModeProvider);
+    final bool isAnyActiveMode = isCreationMode || isEditingMode;
     
     return SizedBox(
       height: 56 * scaleFactor,
       child: ElevatedButton(
         onPressed: () {
-          if (isCreationMode) {
-            // First click: Close creation mode only
+          if (isAnyActiveMode) {
+            // Cancel current action (Creation or Editing)
             ref.read(isCreationModeProvider.notifier).state = false;
             ref.read(selectedCreationTypeProvider.notifier).state = null;
             ref.read(draftComponentProvider.notifier).state = {};
+            
+            ref.read(isEditingModeProvider.notifier).state = false;
+            ref.read(editingComponentProvider.notifier).state = null;
           } else {
-            // Second click (or if not in creation): Close inspector
+            // Close inspector if no mode is active
             _closeInspector();
           }
         },
         style: ElevatedButton.styleFrom(
-          backgroundColor: isCreationMode ? Colors.black : const Color(0xFF374151),
+          backgroundColor: isAnyActiveMode ? Colors.black : const Color(0xFF374151),
           foregroundColor: Colors.white,
           shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
           elevation: 0,
         ),
         child: Text(
-          isCreationMode ? 'CLOSE CREATION' : 'CLOSE',
+          isAnyActiveMode 
+            ? (isCreationMode ? 'CLOSE CREATION' : 'CLOSE EDITING') 
+            : 'CLOSE',
           style: TextStyle(
             fontSize: 16 * scaleFactor,
             fontWeight: FontWeight.w500,
@@ -430,10 +436,12 @@ class _InspectorPanelWidgetState extends ConsumerState<InspectorPanelWidget> {
       ref.read(inspectorStateProvider.notifier).closeInspector();
     }
     
-    // Reset Creation State (Double-safety)
+    // Reset Creation/Edit State (Double-safety)
     ref.read(isCreationModeProvider.notifier).state = false;
     ref.read(selectedCreationTypeProvider.notifier).state = null;
     ref.read(draftComponentProvider.notifier).state = {};
+    ref.read(isEditingModeProvider.notifier).state = false;
+    ref.read(editingComponentProvider.notifier).state = null;
 
     ref.read(activeDeskProvider.notifier).clearActiveDesk();
     ref.read(selectedDeskProvider.notifier).clearSelection();

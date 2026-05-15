@@ -35,7 +35,7 @@ void main() {
 /// Orchestrates the background connection to Supabase and Local Storage
 Future<void> _initializeServices() async {
   await Future.wait([
-    dotenv.load(fileName: ".env"),
+    dotenv.load(fileName: "assets/env"),
     Supabase.initialize(
       url: 'https://wycbnxuhzemgkfebzfmz.supabase.co',
       anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5Y2JueHVoemVtZ2tmZWJ6Zm16Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5MDE2MzgsImV4cCI6MjA5MjQ3NzYzOH0.Df5rENWQ8_xwd6tNQG4x68sAR_MxZMqb7tsJPDnGoKA',
