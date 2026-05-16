@@ -74,6 +74,9 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   /// Cached viewport size for physics calculations to prevent layout thrashing
   Size _viewportSize = const Size(1920, 1080);
   
+  /// Track keyboard height to trigger pan animations when it opens
+  double _keyboardHeight = 0.0;
+  
   // ═══════════════════════════════════════════════════════════════════════════
   // CONSTANTS
   // ═══════════════════════════════════════════════════════════════════════════
@@ -440,7 +443,11 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
     // targetXFactor = (134.49 + (50 * 2.0847)) / 842 ≈ 0.2835
     // targetYFactor = (71.07 + (50 * 2.0847)) / 355 ≈ 0.4938
     final double targetXFactor = isCompact ? 0.2835 : 0.30;
-    final double targetYFactor = isCompact ? 0.4938 : 0.50;
+    
+    // If the keyboard is open, shift the focus point higher to keep the panel visible
+    final double targetYFactor = _keyboardHeight > 0 
+        ? ((widgetSize.height - _keyboardHeight) * 0.3) / widgetSize.height 
+        : (isCompact ? 0.4938 : 0.50);
     
     // Scale: 2.0847 for 355px widget height. 
     // We target ~58.7% of the widget height for the desk grid cell.
@@ -670,6 +677,18 @@ class _MapCanvasWidgetState extends ConsumerState<MapCanvasWidget>
   Widget build(BuildContext context) {
     final bool isInspectorOpen = ref.watch(inspectorStateProvider);
     final Size currentViewportSize = MediaQuery.sizeOf(context);
+    final double currentKeyboardHeight = MediaQuery.viewInsetsOf(context).bottom;
+
+    // AUTO-PAN ON KEYBOARD OPEN/CLOSE:
+    if (_keyboardHeight != currentKeyboardHeight && !_isInitializing) {
+      _keyboardHeight = currentKeyboardHeight;
+      final String? activeDeskId = ref.read(activeDeskProvider);
+      if (activeDeskId != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _animateToWorkstationFocus(activeDeskId);
+        });
+      }
+    }
 
     // AUTO-REFIT ON RESIZE: 
     // If the window is resized and we are in Global Overview, re-center the map.

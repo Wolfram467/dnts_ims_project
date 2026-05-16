@@ -28,6 +28,7 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
   bool _isDntsSerialAiGenerated = false;
   bool _isMfgSerialAiGenerated = false;
   bool _isBrandAiGenerated = false;
+  final Set<TextEditingController> _activeScanningControllers = {};
 
   @override
   void initState() {
@@ -137,9 +138,7 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-              'Camera permission is required to scan serial numbers',
-            ),
+            content: Text('Camera permission is required to scan serial numbers'),
           ),
         );
       }
@@ -151,34 +150,56 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
     );
 
     if (imagePath != null && mounted) {
+      setState(() {
+        _activeScanningControllers.add(targetController);
+      });
       ref.read(isScanningProvider.notifier).state = true;
       final scannerService = ref.read(serialScannerServiceProvider);
 
-      final result = await scannerService.extractData(imagePath, scanType: scanType);
+      try {
+        final result = await scannerService.extractData(imagePath, scanType: scanType);
 
-      if (mounted) {
-        ref.read(isScanningProvider.notifier).state = false;
-        if (result != null) {
+        if (mounted) {
+          if (result != null) {
+            setState(() {
+              if (result.containsKey('dnts_serial') && result['dnts_serial'] != 'NOT_FOUND') {
+                _dntsSerialController.text = result['dnts_serial']!;
+                _isDntsSerialAiGenerated = true;
+              }
+              if (scanType == ScanType.manufacturer) {
+                if (result.containsKey('mfg_serial') && result['mfg_serial'] != 'NOT_FOUND') {
+                  _mfgSerialController.text = result['mfg_serial']!;
+                  _isMfgSerialAiGenerated = true;
+                }
+                if (result.containsKey('brand') && result['brand']!.isNotEmpty) {
+                  _brandController.text = result['brand']!;
+                  _isBrandAiGenerated = true;
+                }
+                if (result.containsKey('category') && result['category']!.isNotEmpty) {
+                  ref.read(selectedCreationTypeProvider.notifier).state = result['category'];
+                }
+              }
+            });
+            _syncToDraft();
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Scan processing failed: ${e.toString().replaceAll('Exception: ', '')}'),
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      } finally {
+        if (mounted) {
           setState(() {
-            if (result.containsKey('dnts_serial') && result['dnts_serial'] != 'NOT_FOUND') {
-              _dntsSerialController.text = result['dnts_serial']!;
-              _isDntsSerialAiGenerated = true;
-            }
-            if (scanType == ScanType.manufacturer) {
-              if (result.containsKey('mfg_serial') && result['mfg_serial'] != 'NOT_FOUND') {
-                _mfgSerialController.text = result['mfg_serial']!;
-                _isMfgSerialAiGenerated = true;
-              }
-              if (result.containsKey('brand') && result['brand']!.isNotEmpty) {
-                _brandController.text = result['brand']!;
-                _isBrandAiGenerated = true;
-              }
-              if (result.containsKey('category') && result['category']!.isNotEmpty) {
-                ref.read(selectedCreationTypeProvider.notifier).state = result['category'];
-              }
-            }
+            _activeScanningControllers.remove(targetController);
           });
-          _syncToDraft();
+          if (_activeScanningControllers.isEmpty) {
+            ref.read(isScanningProvider.notifier).state = false;
+          }
         }
       }
     }
@@ -189,7 +210,7 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
     final selectedType = ref.watch(selectedCreationTypeProvider);
     final formKey = ref.watch(creationFormKeyProvider);
     final capacityError = ref.watch(creationCapacityErrorProvider);
-    final isScanning = ref.watch(isScanningProvider);
+    // isScanning from provider is still active for global indicators, but we won't strictly block UI
 
     // Auto-fill and validation on type change
     ref.listen(selectedCreationTypeProvider, (prev, next) {
@@ -245,10 +266,10 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
                   ),
 
                   // SINGLE COLUMN OF FIELDS (MAXIMIZES WIDTH)
-                  _buildField(_dntsSerialController, 'DNTS Serial', isScanning, ScanType.dnts),
-                  _buildField(_mfgSerialController, 'Mfg Serial', isScanning, ScanType.manufacturer),
-                  _buildField(_brandController, 'Brand', isScanning, ScanType.manufacturer),
-                  _buildField(_dateAcquiredController, 'Date (Optional)', false, ScanType.manufacturer),
+                  _buildField(_dntsSerialController, 'DNTS Serial', ScanType.dnts),
+                  _buildField(_mfgSerialController, 'Mfg Serial', ScanType.manufacturer),
+                  _buildField(_brandController, 'Brand', ScanType.manufacturer),
+                  _buildField(_dateAcquiredController, 'Date (Optional)', ScanType.manufacturer, isOptional: true),
 
                   // STATUS & ERROR (COMPACT)
                   Column(
@@ -283,7 +304,9 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
     );
   }
 
-  Widget _buildField(TextEditingController controller, String label, bool isScanning, ScanType scanType) {
+  Widget _buildField(TextEditingController controller, String label, ScanType scanType, {bool isOptional = false}) {
+    final bool isThisFieldScanning = _activeScanningControllers.contains(controller);
+    
     return SizedBox(
       height: 54, // Fixed height for vertical rhythm
       child: TextFormField(
@@ -291,7 +314,7 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
         onChanged: (_) => _syncToDraft(),
         style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
         decoration: InputDecoration(
-          hintText: label,
+          hintText: isThisFieldScanning ? 'Scanning...' : label,
           hintStyle: const TextStyle(color: Colors.white24, fontSize: 20),
           isDense: true,
           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -305,14 +328,26 @@ class _CreateComponentPanelState extends ConsumerState<CreateComponentPanel> {
             borderRadius: BorderRadius.zero,
             borderSide: BorderSide(color: Color(0xFF4B5563)),
           ),
-          suffixIcon: IconButton(
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-            icon: Icon(Icons.camera_alt, size: 28, color: Colors.white54),
-            onPressed: isScanning ? null : () => _startScanning(controller, scanType),
-          ),
+          suffixIcon: isThisFieldScanning
+              ? const Padding(
+                  padding: EdgeInsets.all(14.0),
+                  child: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      color: Colors.white54,
+                      strokeWidth: 2,
+                    ),
+                  ),
+                )
+              : IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  icon: const Icon(Icons.camera_alt, size: 28, color: Colors.white54),
+                  onPressed: isThisFieldScanning ? null : () => _startScanning(controller, scanType),
+                ),
         ),
-        validator: (v) => v == null || v.isEmpty ? '!' : null,
+        validator: isOptional ? null : (v) => v == null || v.isEmpty ? '!' : null,
       ),
     );
   }

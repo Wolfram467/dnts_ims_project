@@ -17,7 +17,6 @@ class SerialScannerService {
         );
 
   /// Processes an image and extracts the DNTS serial number or a full Component payload.
-  /// Uses Gemma 4 26B for high-volume agentic reasoning.
   Future<Map<String, String>?> extractData(String imagePath, {ScanType scanType = ScanType.manufacturer}) async {
     try {
       final imageBytes = await File(imagePath).readAsBytes();
@@ -53,7 +52,7 @@ class SerialScannerService {
       final responseText = response.text;
 
       if (responseText == null || responseText.isEmpty) {
-        return null;
+        throw Exception("AI returned empty response");
       }
 
       // Clean markdown formatting if present
@@ -67,8 +66,8 @@ class SerialScannerService {
 
       return result;
     } catch (exception) {
-      print('DEBUG_ERROR: $exception');
-      return null;
+      print('DEBUG_ERROR in SerialScannerService: $exception');
+      throw Exception('Failed to process image: $exception');
     }
   }
 }
